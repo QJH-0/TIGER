@@ -1,54 +1,14 @@
-<p align="center">
-  <img src="assets/logo.png" alt="Logo" width="150"/>
-</p>
-<h3  align="center">TIGER: Time-frequency Interleaved Gain Extraction and Reconstruction for Efficient Speech Separation</h3>
-<p align="center">
-  <strong>Mohan Xu<sup>*</sup>, Kai Li<sup>*</sup>, Guo Chen, Xiaolin Hu</strong><br>
-    <strong>Tsinghua University, Beijing, China</strong><br>
-    <strong><sup>*</sup>Equal contribution</strong><br>
-  <a href="https://arxiv.org/abs/2410.01469">📜 ICLR 2025</a> | <a href="https://cslikai.cn/TIGER/">🎶 Demo</a> | <a href="https://huggingface.co/datasets/JusperLee/EchoSet">🤗 Dataset</a>
+# TIGER（MiniLibriMix 默认版）
 
-<p align="center">
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=JusperLee.TIGER" alt="访客统计" />
-  <img src="https://img.shields.io/github/stars/JusperLee/TIGER?style=social" alt="GitHub stars" />
-  <img alt="Static Badge" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" />
-</p>
+本仓库用于语音分离模型 TIGER 的训练、评估与推理。  
+当前默认数据流程已切换为 **MiniLibriMix**。
 
-<p align="center">
+## 1. 项目文档入口
 
-> TIGER is a lightweight model for speech separation which effectively extracts key acoustic features through frequency band-split, multi-scale and full-frequency-frame modeling.
+- 项目树形结构说明：`docs/project_tree_zh.md`
+- 训练流程教程（详细版）：`docs/training_tutorial_zh.md`
 
-## 💥 News
-
-- **[2025-10-07]** We release the code and pre-trained model of TIGER-small and TIGER-tiny! 🚀 ([small](https://huggingface.co/JusperLee/TIGER-speech-small), [tiny](https://huggingface.co/JusperLee/TIGER-speech-tiny))
-- **[2025-01-23]** We release the code and pre-trained model of TIGER! 🚀 ([huggingface](https://huggingface.co/JusperLee/TIGER-speech))
-- **[2025-01-23]** We release the TIGER model and the EchoSet dataset! 🚀
-
-## 📜 Abstract
-
-In this paper, we propose a speech separation model with significantly reduced parameter size and computational cost: Time-Frequency Interleaved Gain Extraction and Reconstruction Network (TIGER). TIGER leverages prior knowledge to divide frequency bands and applies compression on frequency information. We employ a multi-scale selective attention (MSA) module to extract contextual features, while introducing a full-frequency-frame attention (F^3A) module to capture both temporal and frequency contextual information. Additionally, to more realistically evaluate the performance of speech separation models in complex acoustic environments, we introduce a novel dataset called EchoSet. This dataset includes noise and more realistic reverberation (e.g., considering object occlusions and material properties), with speech from two speakers overlapping at random proportions. Experimental results demonstrated that TIGER significantly outperformed state-of-the-art (SOTA) model TF-GridNet on the EchoSet dataset in both inference speed and separation quality, while reducing the number of parameters by 94.3% and the MACs by 95.3%. These results indicate that by utilizing frequency band-split and interleaved modeling structures, TIGER achieves a substantial reduction in parameters and computational costs while maintaining high performance. Notably, TIGER is the first speech separation model with fewer than 1 million parameters that achieves performance close to the SOTA model.
-
-## TIGER
-
-Overall pipeline of the model architecture of TIGER and its modules.
-
-![TIGER Model Architecture](assets/TIGER.png)
-
-## Results
-
-Performance comparisons of TIGER and other existing separation models on ***Libri2Mix, LRS2-2Mix, and EchoSet***. Bold indicates optimal performance, and italics indicate suboptimal performance.
-
-![TIGER Model Architecture](assets/result.png)
-
-Efficiency comparisons of TIGER and other models.
-
-![TIGER Model Architecture](assets/efficiency.png)
-
-Comparison of performance and efficiency of cinematic sound separation models on DnR. '*' means the result comes from the original paper of DnR.
-
-![TIGER Model Architecture](assets/dnr.png)
-
-## 📦 Installation
+## 2. 环境安装
 
 ```bash
 git clone https://github.com/JusperLee/TIGER.git
@@ -56,35 +16,84 @@ cd TIGER
 pip install -r requirements.txt
 ```
 
-## 🚀 Quick Start
-
-### Test with Pre-trained Model
+W&B 首次使用需要登录一次：
 
 ```bash
-# Test using speech
+wandb login
+```
+
+## 3. 默认数据与索引生成（MiniLibriMix）
+
+默认原始数据目录：
+
+- `D:\Paper\datasets\MiniLibriMix`
+
+生成训练索引（JSON）到项目内：
+
+```bash
+python DataPreProcess/process_librimix.py --in_dir "D:/Paper/datasets/MiniLibriMix" --out_dir "D:/Paper/TIGER/DataPreProcess/MiniLibriMix" --splits train val test --speakers mix_both s1 s2
+```
+
+生成后目录应为：
+
+- `DataPreProcess/MiniLibriMix/train/{mix_both.json,s1.json,s2.json}`
+- `DataPreProcess/MiniLibriMix/val/{mix_both.json,s1.json,s2.json}`
+- `DataPreProcess/MiniLibriMix/test/{mix_both.json,s1.json,s2.json}`
+
+## 4. 默认训练配置
+
+默认配置文件：`configs/tiger-large.yml`
+
+已配置为：
+
+- `data_name: Libri2MixModuleRemix`
+- `train_dir: DataPreProcess/MiniLibriMix/train`
+- `valid_dir: DataPreProcess/MiniLibriMix/val`
+- `test_dir: DataPreProcess/MiniLibriMix/test`
+
+## 5. 训练与评估
+
+训练：
+
+```bash
+python audio_train.py --conf_dir configs/tiger-large.yml
+```
+
+评估：
+
+```bash
+python audio_test.py --conf_dir configs/tiger-large.yml
+```
+
+训练产物默认输出到：
+
+- `Experiments/checkpoint/<exp_name>/`
+
+关键文件包括：
+
+- `best_model.pth`
+- `best_k_models.json`
+- `results/metrics.csv`
+
+## 6. 推理示例
+
+```bash
+# 语音分离
 python inference_speech.py --audio_path test/mix.wav
 
-# Test using DnR
+# DnR 示例
 python inference_dnr.py --audio_path test/test_mixture_466.wav
 ```
 
-### Train with EchoSet
+## 7. 常见问题
 
-```bash
-python audio_train.py --conf_dir configs/tiger.yml
-```
+- **找不到数据**：确认 `DataPreProcess/MiniLibriMix/*` 已生成且配置路径一致。
+- **W&B 报错**：执行 `wandb login`，或在服务器中设置 `WANDB_API_KEY`。
+- **显存不足**：先减小 `batch_size`，再降低模型规模参数。
 
-### Evaluate with EchoSet
+## 8. 论文与引用
 
-```bash
-python audio_test.py --conf_dir configs/tiger.yml
-```
-
-### Huggingface Space
-
-https://huggingface.co/spaces/fffiloni/TIGER-audio-extraction
-
-## 📖 Citation
+- 论文：[TIGER: Time-frequency Interleaved Gain Extraction and Reconstruction for Efficient Speech Separation](https://arxiv.org/abs/2410.01469)
 
 ```bibtex
 @article{xu2024tiger,
@@ -94,7 +103,3 @@ https://huggingface.co/spaces/fffiloni/TIGER-audio-extraction
   year={2024}
 }
 ```
-
-## 📧 Contact
-
-If you have any questions, please feel free to contact us via `tsinghua.kaili@gmail.com`.

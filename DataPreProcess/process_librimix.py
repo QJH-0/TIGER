@@ -4,6 +4,15 @@ import os
 import soundfile as sf
 from tqdm import tqdm
 
+# MiniLibriMix default naming.
+DEFAULT_SPLITS = ["train", "val", "test"]
+# Original LibriMix naming (kept for compatibility reference):
+# LEGACY_SPLITS = ["train-100", "dev", "test"]
+
+DEFAULT_SPEAKERS = ["mix_both", "s1", "s2"]
+# Optional extra folders in some datasets (not used by training datamodule):
+# LEGACY_OR_EXTRA_SPEAKERS = ["mix_clean", "noise"]
+
 
 def preprocess_one_dir(in_data_dir, out_dir, data_type, spk):
     """Create .json file for one condition."""
@@ -33,8 +42,8 @@ def preprocess_one_dir(in_data_dir, out_dir, data_type, spk):
 
 def preprocess_librimix_audio(inp_args):
     """Create .json files for all conditions."""
-    speaker_list = ["mix_both", "s1", "s2"]
-    for data_type in ["train-100", "dev", "test"]:
+    speaker_list = inp_args.speakers
+    for data_type in inp_args.splits:
         for spk in speaker_list:
             preprocess_one_dir(
                 inp_args.in_dir, inp_args.out_dir, data_type, spk,
@@ -47,10 +56,22 @@ if __name__ == "__main__":
         "--in_dir",
         type=str,
         default=None,
-        help="Directory path of audio including tr, cv and tt",
+        help="Dataset root directory containing split folders.",
     )
     parser.add_argument(
         "--out_dir", type=str, default=None, help="Directory path to put output files"
+    )
+    parser.add_argument(
+        "--splits",
+        nargs="+",
+        default=DEFAULT_SPLITS,
+        help="Split names under in_dir. Default is MiniLibriMix naming.",
+    )
+    parser.add_argument(
+        "--speakers",
+        nargs="+",
+        default=DEFAULT_SPEAKERS,
+        help="Subdirectories to index under each split.",
     )
     args = parser.parse_args()
     print(args)

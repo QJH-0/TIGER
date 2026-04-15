@@ -102,7 +102,7 @@ torchmetrics==1.6.0
 torchvision==0.20.1
 tqdm==4.67.0
 transformers==4.47.1
-triton==3.1.0
+triton==3.1.0; platform_system != "Windows"
 typeguard==2.13.3
 typing_extensions==4.12.2
 tzdata==2024.2
