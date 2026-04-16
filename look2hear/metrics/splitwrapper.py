@@ -4,6 +4,7 @@ import numpy as np
 import logging
 
 # from torch_mir_eval.separation import bss_eval_sources
+from .wrapper import format_metric_value
 from ..losses import (
     PITLossWrapper,
     pairwise_neg_sisdr,
@@ -75,16 +76,15 @@ class SPlitMetricsTracker:
 
         row = {
             "snt_id": key,
-            "one_snr": -one_snr.item(),
-            "one_snr_i": -one_snr_i.item(),
-            "one_si-snr": -one_sisnr.item(),
-            "one_si-snr_i": -one_sisnr_i.item(),
-            "two_snr": -two_snr.item(),
-            "two_snr_i": -two_snr_i.item(),
-            "two_si-snr": -two_sisnr.item(),
-            "two_si-snr_i": -two_sisnr_i.item(),
+            "one_snr": format_metric_value(-one_snr.item()),
+            "one_snr_i": format_metric_value(-one_snr_i.item()),
+            "one_si-snr": format_metric_value(-one_sisnr.item()),
+            "one_si-snr_i": format_metric_value(-one_sisnr_i.item()),
+            "two_snr": format_metric_value(-two_snr.item()),
+            "two_snr_i": format_metric_value(-two_snr_i.item()),
+            "two_si-snr": format_metric_value(-two_sisnr.item()),
+            "two_si-snr_i": format_metric_value(-two_sisnr_i.item()),
         }
-        self.writer.writerow(row)
         # Metric Accumulation
         self.one_all_snrs.append(-one_snr.item())
         self.one_all_snrs_i.append(-one_snr_i.item())
@@ -98,14 +98,14 @@ class SPlitMetricsTracker:
     def final(self,):
         row = {
             "snt_id": "avg",
-            "one_snr": np.array(self.one_all_snrs).mean(),
-            "one_snr_i": np.array(self.one_all_snrs_i).mean(),
-            "one_si-snr": np.array(self.one_all_sisnrs).mean(),
-            "one_si-snr_i": np.array(self.one_all_sisnrs_i).mean(),
-            "two_snr": np.array(self.two_all_snrs).mean(),
-            "two_snr_i": np.array(self.two_all_snrs_i).mean(),
-            "two_si-snr": np.array(self.two_all_sisnrs).mean(),
-            "two_si-snr_i": np.array(self.two_all_sisnrs_i).mean(),
+            "one_snr": format_metric_value(np.array(self.one_all_snrs).mean()),
+            "one_snr_i": format_metric_value(np.array(self.one_all_snrs_i).mean()),
+            "one_si-snr": format_metric_value(np.array(self.one_all_sisnrs).mean()),
+            "one_si-snr_i": format_metric_value(np.array(self.one_all_sisnrs_i).mean()),
+            "two_snr": format_metric_value(np.array(self.two_all_snrs).mean()),
+            "two_snr_i": format_metric_value(np.array(self.two_all_snrs_i).mean()),
+            "two_si-snr": format_metric_value(np.array(self.two_all_sisnrs).mean()),
+            "two_si-snr_i": format_metric_value(np.array(self.two_all_sisnrs_i).mean()),
         }
         self.writer.writerow(row)
         # logger.info("Mean SISNR is {}".format(row["si-snr"]))

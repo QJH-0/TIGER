@@ -11,9 +11,7 @@
 ## 2. 环境安装
 
 ```bash
-git clone https://github.com/JusperLee/TIGER.git
-cd TIGER
-pip install -r requirements.txt
+git clone https://github.com/JusperLee/TIGER.git && cd TIGER && pip install -r requirements.txt
 ```
 
 W&B 首次使用需要登录一次：
@@ -40,7 +38,37 @@ python DataPreProcess/process_librimix.py --in_dir "D:/Paper/datasets/MiniLibriM
 - `DataPreProcess/MiniLibriMix/val/{mix_both.json,s1.json,s2.json}`
 - `DataPreProcess/MiniLibriMix/test/{mix_both.json,s1.json,s2.json}`
 
-## 4. 默认训练配置
+## 4. Kaggle T4x2 训练流程（MiniLibriMix）
+
+如果你在 Kaggle 的 `T4 x2` GPU 环境上训练，先将原始 MiniLibriMix 数据集上传为 Kaggle Dataset。下面假设挂载路径为：
+
+- `/kaggle/input/MiniLibriMix`
+
+先在 Kaggle Notebook 中生成训练所需的 JSON 索引：
+
+```bash
+python DataPreProcess/process_librimix.py --in_dir /kaggle/input/MiniLibriMix --out_dir /kaggle/working/DataPreProcess/MiniLibriMix --splits train val test --speakers mix_both s1 s2
+```
+
+生成完成后，使用双 T4 配置开始训练：
+
+```bash
+python audio_train.py --conf_dir configs/tiger-large-kaggle-t4x2.yml
+```
+
+该配置文件已预设：
+
+- `gpus: [0, 1]`
+- `batch_size: 4`
+- `segment: 3.0`
+- `num_workers: 4`
+- `train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train`
+- `valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val`
+- `test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test`
+
+如果你的 Kaggle Dataset 名称不是 `MiniLibriMix`，把 `--in_dir` 改成实际挂载路径即可。
+
+## 5. 默认训练配置
 
 默认配置文件：`configs/tiger-large.yml`
 
@@ -51,7 +79,7 @@ python DataPreProcess/process_librimix.py --in_dir "D:/Paper/datasets/MiniLibriM
 - `valid_dir: DataPreProcess/MiniLibriMix/val`
 - `test_dir: DataPreProcess/MiniLibriMix/test`
 
-## 5. 训练与评估
+## 6. 训练与评估
 
 训练：
 
@@ -75,7 +103,13 @@ python audio_test.py --conf_dir configs/tiger-large.yml
 - `best_k_models.json`
 - `results/metrics.csv`
 
-## 6. 推理示例
+训练保存策略：
+
+- `last.ckpt` 每轮更新，用于断点续训
+- 按 epoch 命名的 checkpoint 每 10 轮保存一次
+- `audio_test.py` 默认加载 `best_model.pth` 做评估；断点续训应加载 `.ckpt`
+
+## 7. 推理示例
 
 ```bash
 # 语音分离
@@ -85,13 +119,13 @@ python inference_speech.py --audio_path test/mix.wav
 python inference_dnr.py --audio_path test/test_mixture_466.wav
 ```
 
-## 7. 常见问题
+## 8. 常见问题
 
 - **找不到数据**：确认 `DataPreProcess/MiniLibriMix/*` 已生成且配置路径一致。
 - **W&B 报错**：执行 `wandb login`，或在服务器中设置 `WANDB_API_KEY`。
 - **显存不足**：先减小 `batch_size`，再降低模型规模参数。
 
-## 8. 论文与引用
+## 9. 论文与引用
 
 - 论文：[TIGER: Time-frequency Interleaved Gain Extraction and Reconstruction for Efficient Speech Separation](https://arxiv.org/abs/2410.01469)
 

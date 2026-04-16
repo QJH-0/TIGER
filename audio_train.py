@@ -33,6 +33,17 @@ import wandb
 #手动登录
 # wandb.login()
 
+"""
+TIGER 训练脚本。
+
+职责：
+1. 根据 yaml 配置实例化 `datamodule`、`audio model`、优化器与（可选）学习率调度器。
+2. 构建 Look2Hear 的 `System`（封装 loss / train / val / test 逻辑），并配置 Lightning Trainer。
+3. 训练完成后保存：
+   - `best_k_models.json`（checkpoint 中 top-k 模型的分数）
+   - `best_model.pth`（将 best checkpoint 的 state_dict 加载到音频模型并序列化）
+"""
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--conf_dir",
@@ -40,7 +51,64 @@ parser.add_argument(
     help="Full path to save best validation model",
 )
 
+
+def configure_wandb_epoch_metrics(wandb_logger):
+    # 统一把 W&B 的横轴绑定到 epoch，避免训练/验证/测试指标各自用不同 step。
+    experiment = wandb_logger.experiment
+    experiment.define_metric("epoch")
+    experiment.define_metric("train/*", step_metric="epoch")
+    experiment.define_metric("val/*", step_metric="epoch")
+    experiment.define_metric("test/*", step_metric="epoch")
+
+
+def build_checkpoint_callback(checkpoint_dir):
+    # 训练中始终保留 last.ckpt 用于断点续训，编号 checkpoint 仅每 10 轮落盘一次。
+    return ModelCheckpoint(
+        checkpoint_dir,
+        filename="{epoch}",
+        monitor="val/loss_epoch",
+        mode="min",
+        save_top_k=5,
+        verbose=True,
+        save_last=True,
+        every_n_epochs=10,
+    )
+
+
+def resolve_resume_checkpoint_path(config, exp_dir):
+    # 断点续训只认 Lightning checkpoint，不从 best_model.pth 恢复训练状态。
+    main_args = config.get("main_args", {})
+    resume_setting = main_args.get("resume_from_checkpoint")
+    if not resume_setting:
+        return None
+
+    if isinstance(resume_setting, str):
+        # 支持显式写 "last" 或直接给某个 .ckpt 的绝对/相对路径。
+        if resume_setting.lower() == "last":
+            return os.path.join(exp_dir, "last.ckpt")
+        return resume_setting
+
+    if resume_setting is True:
+        # 简写为 true 时，默认恢复当前实验目录下的 last.ckpt。
+        return os.path.join(exp_dir, "last.ckpt")
+
+    return None
+
 def main(config):
+    """
+    使用 PyTorch Lightning 进行训练。
+
+    参数
+    - config (dict): 从 yaml 解析得到的配置字典，至少包含：
+      - `datamodule.data_name` / `datamodule.data_config`
+      - `audionet.audionet_name` / `audionet.audionet_config`
+      - `optimizer`、可选的 `scheduler`
+      - `loss.train` 与 `loss.val`
+      - `training`（epochs、gpus、system、early_stop 等）
+      - `exp.exp_name` / `main_args`（用于保存实验目录）
+    返回
+    - None
+    """
     print_only(
         "Instantiating datamodule <{}>".format(config["datamodule"]["data_name"])
     )
@@ -49,9 +117,10 @@ def main(config):
     )
     datamodule.setup()
 
+    # Lightning DataLoader：用于训练/验证/测试阶段。
     train_loader, val_loader, test_loader = datamodule.make_loader
     
-    # Define model and optimizer
+    # 构建音频模型与优化器
     print_only(
         "Instantiating AudioNet <{}>".format(config["audionet"]["audionet_name"])
     )
@@ -63,7 +132,7 @@ def main(config):
     print_only("Instantiating Optimizer <{}>".format(config["optimizer"]["optim_name"]))
     optimizer = make_optimizer(model.parameters(), **config["optimizer"])
 
-    # Define scheduler
+    # 学习率调度器：根据配置选择开启或不启用。
     scheduler = None
     if config["scheduler"]["sche_name"]:
         print_only(
@@ -75,6 +144,7 @@ def main(config):
             )
         else:
             scheduler = {
+                # DPTNetScheduler 采用 Lightning 的字典形式并指定 interval。
                 "scheduler": getattr(look2hear.system.schedulers, config["scheduler"]["sche_name"])(
                     optimizer, len(train_loader) // config["datamodule"]["data_config"]["batch_size"], 64
                 ),
@@ -82,6 +152,7 @@ def main(config):
             }
 
     # Just after instantiating, save the args. Easy loading in the future.
+    # 将当前配置落盘到实验目录，便于复现实验与定位参数来源。
     config["main_args"]["exp_dir"] = os.path.join(
         os.getcwd(), "Experiments", "checkpoint", config["exp"]["exp_name"]
     )
@@ -91,7 +162,7 @@ def main(config):
     with open(conf_path, "w") as outfile:
         yaml.safe_dump(config, outfile)
 
-    # Define Loss function.
+    # 定义 Loss：分别构建 train/val 两套 loss 组件（sdr_type 可能不同）。
     print_only(
         "Instantiating Loss, Train <{}>, Val <{}>".format(
             config["loss"]["train"]["sdr_type"], config["loss"]["val"]["sdr_type"]
@@ -109,6 +180,7 @@ def main(config):
     }
 
     print_only("Instantiating System <{}>".format(config["training"]["system"]))
+    # System 负责把 model + loss + optimizer + dataloaders 串起来，并提供 Lightning 的训练步骤。
     system = getattr(look2hear.system, config["training"]["system"])(
         audio_model=model,
         loss_func=loss_func,
@@ -124,15 +196,8 @@ def main(config):
     print_only("Instantiating ModelCheckpoint")
     callbacks = []
     checkpoint_dir = os.path.join(exp_dir)
-    checkpoint = ModelCheckpoint(
-        checkpoint_dir,
-        filename="{epoch}",
-        monitor="val_loss/dataloader_idx_0",
-        mode="min",
-        save_top_k=5,
-        verbose=True,
-        save_last=True,
-    )
+    # 根据 val_loss/dataloader_idx_0 监控最优模型，并保留 top-k。
+    checkpoint = build_checkpoint_callback(checkpoint_dir)
     callbacks.append(checkpoint)
 
     if config["training"]["early_stop"]:
@@ -141,6 +206,7 @@ def main(config):
     callbacks.append(MyRichProgressBar(theme=RichProgressBarTheme()))
 
     # Don't ask GPU if they are not available.
+    # 单卡/无 GPU：走 Lightning 默认策略；多卡且明确选择多张 CUDA 卡：启用 DDP。
     gpus = config["training"]["gpus"] if torch.cuda.is_available() else None
     distributed_backend = "cuda" if torch.cuda.is_available() else None
     # 仅在明确选择了多张 CUDA 卡时启用 DDP。
@@ -156,8 +222,10 @@ def main(config):
             project="Real-work-dataset",
             # offline=True
     )
+    configure_wandb_epoch_metrics(comet_logger)
 
     # 单卡走默认策略，多卡保留 DDP，避免单卡场景策略配置报错。
+    # limit_train_batches=1.0 用于完整训练；若想快速调试可以改成更小比例。
     trainer = pl.Trainer(
         max_epochs=config["training"]["epochs"],
         callbacks=callbacks,
@@ -174,12 +242,17 @@ def main(config):
         # sync_batchnorm=True,
         # fast_dev_run=True,
     )
-    trainer.fit(system)
+    resume_ckpt_path = resolve_resume_checkpoint_path(config, exp_dir)
+    # 恢复训练时把 ckpt_path 交给 Trainer；非恢复场景传 None 即可。
+    trainer.fit(system, ckpt_path=resume_ckpt_path)
     print_only("Finished Training")
+
+    # 保存 best_k_models：用于后续查看 checkpoint 分数分布。
     best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
     with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
         json.dump(best_k, f, indent=0)
 
+    # 将 best checkpoint 的 state_dict 加载回 system，然后把模型移到 CPU 并序列化音频模型权重。
     state_dict = torch.load(checkpoint.best_model_path)
     system.load_state_dict(state_dict=state_dict["state_dict"])
     system.cpu()

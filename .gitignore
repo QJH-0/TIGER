@@ -11,3 +11,4 @@ Experiments/**/checkpoint/**/conf.yml
 tea_debug.log
 /.cursor/
 /Experiments/
+/docs/

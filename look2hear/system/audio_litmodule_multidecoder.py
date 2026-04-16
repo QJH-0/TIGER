@@ -57,7 +57,7 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
         #     perturb_prob=1.0
         # )
         # Save lightning"s AttributeDict under self.hparams
-        self.default_monitor = "val_loss/dataloader_idx_0"
+        self.default_monitor = "val/loss_epoch"
         self.save_hyperparameters(self.config_to_hparams(self.config))
         # self.print(self.audio_model)
         self.validation_step_outputs = []
@@ -115,8 +115,9 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
         loss = self.loss_func["train"](ests_sources_each_block, targets)
 
         self.log(
-            "train_loss",
+            "train/loss_epoch",
             loss,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             sync_dist=True,
@@ -134,8 +135,9 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
             est_sources = self(mixtures)
             loss = self.loss_func["val"](est_sources, targets)
             self.log(
-                "val_loss",
+                "val/loss_epoch",
                 loss,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 sync_dist=True,
@@ -153,8 +155,9 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
             est_sources = self(mixtures)
             tloss = self.loss_func["val"](est_sources, targets)
             self.log(
-                "test_loss",
+                "test/loss_epoch",
                 tloss,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
                 sync_dist=True,
@@ -168,25 +171,45 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
         avg_loss = torch.stack(self.validation_step_outputs).mean()
         val_loss = torch.mean(self.all_gather(avg_loss))
         self.log(
-            "lr",
+            "epoch",
+            float(self.current_epoch),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
+            sync_dist=True,
+            logger=True,
+        )
+        self.log(
+            "train/lr_epoch",
             self.optimizer.param_groups[0]["lr"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
+            sync_dist=True,
+            logger=True,
+        )
+        self.log(
+            "val/pit_sisnr_epoch",
+            -val_loss,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             sync_dist=True,
-        )
-        self.logger.experiment.log(
-            {"learning_rate": self.optimizer.param_groups[0]["lr"], "epoch": self.current_epoch}
-        )
-        self.logger.experiment.log(
-            {"val_pit_sisnr": -val_loss, "epoch": self.current_epoch}
+            logger=True,
         )
 
         # test
         if (self.trainer.current_epoch) % 10 == 0:
             avg_loss = torch.stack(self.test_step_outputs).mean()
             test_loss = torch.mean(self.all_gather(avg_loss))
-            self.logger.experiment.log(
-                {"test_pit_sisnr": -test_loss, "epoch": self.current_epoch}
+            self.log(
+                "test/pit_sisnr_epoch",
+                -test_loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+                logger=True,
             )
         self.validation_step_outputs.clear()  # free memory
         self.test_step_outputs.clear()  # free memory

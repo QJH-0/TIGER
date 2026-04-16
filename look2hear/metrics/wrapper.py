@@ -16,6 +16,10 @@ from ..losses import (
 logger = logging.getLogger(__name__)
 
 
+def format_metric_value(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
 class MetricsTracker:
     def __init__(self, save_file: str = ""):
         self.all_sdrs = []
@@ -47,12 +51,14 @@ class MetricsTracker:
         # import pdb; pdb.set_trace()
         row = {
             "snt_id": key,
-            "sdr": sdr.item(),
-            "sdr_i": sdr_i.item(),
-            "si-snr": -sisnr.item(),
-            "si-snr_i": -sisnr_i.item(),
+            "sdr": format_metric_value(sdr.item()),
+            "sdr_i": format_metric_value(sdr_i.item()),
+            "si-snr": format_metric_value(-sisnr.item()),
+            "si-snr_i": format_metric_value(-sisnr_i.item()),
         }
-        self.writer.writerow(row)
+        # 原始逻辑：把每个样本的指标写入 CSV（会导致 metrics.csv 行数爆炸、很乱）。
+        # 修改：只保留累积（all_* 列表），最终在 final() 写平均值即可。
+        # self.writer.writerow(row)
         # Metric Accumulation
         self.all_sdrs.append(sdr.item())
         self.all_sdrs_i.append(sdr_i.item())
@@ -67,18 +73,20 @@ class MetricsTracker:
     def final(self,):
         row = {
             "snt_id": "avg",
-            "sdr": np.array(self.all_sdrs).mean(),
-            "sdr_i": np.array(self.all_sdrs_i).mean(),
-            "si-snr": np.array(self.all_sisnrs).mean(),
-            "si-snr_i": np.array(self.all_sisnrs_i).mean(),
+            "sdr": format_metric_value(np.array(self.all_sdrs).mean()),
+            "sdr_i": format_metric_value(np.array(self.all_sdrs_i).mean()),
+            "si-snr": format_metric_value(np.array(self.all_sisnrs).mean()),
+            "si-snr_i": format_metric_value(np.array(self.all_sisnrs_i).mean()),
         }
         self.writer.writerow(row)
-        row = {
-            "snt_id": "std",
-            "sdr": np.array(self.all_sdrs).std(),
-            "sdr_i": np.array(self.all_sdrs_i).std(),
-            "si-snr": np.array(self.all_sisnrs).std(),
-            "si-snr_i": np.array(self.all_sisnrs_i).std(),
-        }
-        self.writer.writerow(row)
+        # 原始逻辑：同时写 std 行。
+        # 修改：按你的需求只输出测试集平均值，去掉 std。
+        # row = {
+        #     "snt_id": "std",
+        #     "sdr": np.array(self.all_sdrs).std(),
+        #     "sdr_i": np.array(self.all_sdrs_i).std(),
+        #     "si-snr": np.array(self.all_sisnrs).std(),
+        #     "si-snr_i": np.array(self.all_sisnrs_i).std(),
+        # }
+        # self.writer.writerow(row)
         self.results_csv.close()

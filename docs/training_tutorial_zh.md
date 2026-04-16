@@ -67,7 +67,7 @@ python audio_train.py --conf_dir configs/tiger-large.yml
 
 - `best_model.pth`
 - `best_k_models.json`
-- `last.ckpt` 与多份 epoch ckpt
+- `last.ckpt` 与每 10 轮保存一次的 epoch ckpt
 
 ## 5. 评估模型
 
@@ -212,7 +212,7 @@ python audio_train.py --conf_dir configs/tiger-large.yml
 
 - 创建实验目录：`Experiments/checkpoint/<exp_name>`
 - 备份本次配置：`conf.yml`
-- 保存 checkpoint：`{epoch}.ckpt`、`last.ckpt`
+- 保存 checkpoint：`last.ckpt` 每轮更新，`{epoch}.ckpt` 每 10 轮保存一次
 - 导出最优模型：`best_model.pth`
 - 保存 top-k 信息：`best_k_models.json`
 - 记录日志到 W&B（项目名固定为 `Real-work-dataset`）
@@ -226,6 +226,12 @@ python audio_test.py --conf_dir configs/tiger-large.yml
 默认会从：
 
 - `Experiments/checkpoint/<exp_name>/best_model.pth`
+
+说明：
+
+- 评估脚本 `audio_test.py` 默认加载 `best_model.pth`
+- 如需切到预训练模型评估，可在配置中设置 `train_conf.main_args.test_model_path`
+- 断点续训应通过训练侧的 `.ckpt`，可设置 `main_args.resume_from_checkpoint: true` 自动使用 `last.ckpt`
 
 加载模型并在 `test` 集上跑推理，结果输出到：
 
