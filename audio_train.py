@@ -30,7 +30,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import wandb
-wandb.login()
+#手动登录
+# wandb.login()
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -142,6 +143,8 @@ def main(config):
     # Don't ask GPU if they are not available.
     gpus = config["training"]["gpus"] if torch.cuda.is_available() else None
     distributed_backend = "cuda" if torch.cuda.is_available() else None
+    # 仅在明确选择了多张 CUDA 卡时启用 DDP。
+    use_ddp = isinstance(gpus, (list, tuple)) and len(gpus) > 1
 
     # default logger used by trainer
     logger_dir = os.path.join(os.getcwd(), "Experiments", "tensorboard_logs")
@@ -154,13 +157,14 @@ def main(config):
             # offline=True
     )
 
+    # 单卡走默认策略，多卡保留 DDP，避免单卡场景策略配置报错。
     trainer = pl.Trainer(
         max_epochs=config["training"]["epochs"],
         callbacks=callbacks,
         default_root_dir=exp_dir,
         devices=gpus,
         accelerator=distributed_backend,
-        strategy=DDPStrategy(find_unused_parameters=True),
+        strategy=DDPStrategy(find_unused_parameters=True) if use_ddp else "auto",
         limit_train_batches=1.0,  # Useful for fast experiment
         gradient_clip_val=5.0,
         logger=comet_logger,
@@ -193,8 +197,13 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    with open(args.conf_dir) as f:
-        def_conf = yaml.safe_load(f)
+    # Windows 下默认编码可能是 GBK；配置文件通常是 UTF-8（有时带 BOM）。
+    try:
+        with open(args.conf_dir, "r", encoding="utf-8") as f:
+            def_conf = yaml.safe_load(f)
+    except UnicodeDecodeError:
+        with open(args.conf_dir, "r", encoding="utf-8-sig") as f:
+            def_conf = yaml.safe_load(f)
     parser = prepare_parser_from_dict(def_conf, parser=parser)
 
     arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)

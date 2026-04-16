@@ -140,12 +140,30 @@ def parse_args_as_dict(parser, return_plain_args=False, args=None):
     for group in parser._action_groups:
         group_dict = {a.dest: getattr(args, a.dest, None) for a in group._group_actions}
         args_dic[group.title] = group_dict
-    if sys.version_info.minor == 10:
-        args_dic["main_args"] = args_dic["positional arguments"]
-        del args_dic["positional arguments"]
+
+    # 注意：不同 Python/argparse 版本里，非配置参数的默认分组名可能不同：
+    # - "optional arguments"（较旧版本常见）
+    # - "options"（较新版本常见）
+    # - "positional arguments"（项目在 py3.10 里曾依赖过）
+    # 如果只写死一个分组名，升级环境后容易触发 KeyError。
+    # 兼容性修复：按顺序探测 argparse 常见默认分组名。
+    main_arg_group_candidates = [
+        "optional arguments",
+        "options",
+        "positional arguments",
+    ]
+    main_group_name = None
+    for group_name in main_arg_group_candidates:
+        if group_name in args_dic:
+            main_group_name = group_name
+            break
+
+    # 兜底处理：即使未来 argparse 再改分组名，也不让解析直接失败。
+    if main_group_name is not None:
+        args_dic["main_args"] = args_dic.pop(main_group_name)
     else:
-        args_dic["main_args"] = args_dic["optional arguments"]
-        del args_dic["optional arguments"]
+        args_dic["main_args"] = {}
+
     if return_plain_args:
         return args_dic, args
     return args_dic

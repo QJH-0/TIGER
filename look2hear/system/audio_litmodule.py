@@ -136,7 +136,10 @@ class AudioLightningModule(pl.LightningModule):
             return {"val_loss": loss}
 
         # cal test loss
-        if (self.trainer.current_epoch) % 10 == 0 and dataloader_idx == 1:
+        # 原逻辑：每 10 个 epoch 才在 dataloader_idx == 1 上计算 test loss
+        # if (self.trainer.current_epoch) % 10 == 0 and dataloader_idx == 1:
+        # 当前逻辑：每个 epoch 都计算 test loss
+        if dataloader_idx == 1:
             mixtures, targets, _ = batch
             # print(mixtures.shape)
             est_sources = self(mixtures)
@@ -171,7 +174,15 @@ class AudioLightningModule(pl.LightningModule):
         )
 
         # test
-        if (self.trainer.current_epoch) % 10 == 0:
+        # 原逻辑：仅在每 10 个 epoch 记录一次 test 指标
+        # if (self.trainer.current_epoch) % 10 == 0:
+        #     avg_loss = torch.stack(self.test_step_outputs).mean()
+        #     test_loss = torch.mean(self.all_gather(avg_loss))
+        #     self.logger.experiment.log(
+        #         {"test_pit_sisnr": -test_loss, "epoch": self.current_epoch}
+        #     )
+        # 当前逻辑：每个 epoch 只要有 test 输出就记录 test 指标
+        if self.test_step_outputs:
             avg_loss = torch.stack(self.test_step_outputs).mean()
             test_loss = torch.mean(self.all_gather(avg_loss))
             self.logger.experiment.log(

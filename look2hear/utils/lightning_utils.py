@@ -1,5 +1,6 @@
 from rich import print
 from dataclasses import dataclass
+import inspect
 from pytorch_lightning.utilities import rank_zero_only
 from typing import Union
 from pytorch_lightning.callbacks.progress.rich_progress import *
@@ -91,7 +92,18 @@ class MyRichProgressBar(RichProgressBar):
             # file = open("Look2Hear/Experiments/run_logs/EdgeFRCNN-Noncausal.log", 'w')
             self._console: Console = Console(force_terminal=True)
             self._console.clear_live()
-            self._metric_component = MetricsTextColumn(trainer, self.theme.metrics)
+            # 兼容不同 pytorch_lightning 版本的 MetricsTextColumn 构造参数差异。
+            # 新版本额外需要 text_delimiter 和 metrics_format。
+            metric_sig = inspect.signature(MetricsTextColumn.__init__)
+            if "text_delimiter" in metric_sig.parameters and "metrics_format" in metric_sig.parameters:
+                self._metric_component = MetricsTextColumn(
+                    trainer,
+                    self.theme.metrics,
+                    " ",
+                    ".3f",
+                )
+            else:
+                self._metric_component = MetricsTextColumn(trainer, self.theme.metrics)
             self.progress = CustomProgress(
                 *self.configure_columns(trainer),
                 self._metric_component,

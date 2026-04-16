@@ -28,9 +28,13 @@ loss:
 # Training config
 training:
   system: AudioLightningModule
-  gpus: [2,3,4,5,6,7,8,9]
+  # 调试阶段临时配置：仅使用单张可见 GPU 运行。
+  # gpus: [2,3,4,5,6,7,8,9]
+  gpus: [0]
   parallel: ddp
-  epochs: 500
+  # 调试快速验证：先缩短训练轮数。
+  # epochs: 500
+  epochs: 5
   early_stop:
     monitor: val_loss/dataloader_idx_0
     mode: min
@@ -53,19 +57,30 @@ scheduler:
 
 # Data config
 datamodule:
-  data_name: EchoSetDataModule
+  # 当前实验将数据集从 EchoSet 切换到 MiniLibriMix。
+  # data_name: EchoSetDataModule
+  data_name: Libri2MixModuleRemix
   data_config:
-    train_dir: DataPreProcess/EchoSet/train
-    valid_dir: DataPreProcess/EchoSet/val
-    test_dir: DataPreProcess/EchoSet/test
+    # train_dir: DataPreProcess/EchoSet/train
+    # valid_dir: DataPreProcess/EchoSet/val
+    # test_dir: DataPreProcess/EchoSet/test
+    train_dir: DataPreProcess/MiniLibriMix/train
+    valid_dir: DataPreProcess/MiniLibriMix/val
+    test_dir: DataPreProcess/MiniLibriMix/test
     n_src: 2
     sample_rate: 16000
-    segment: 3.0
+    # 使用更短切片，加快本地 sanity run 速度。
+    # segment: 3.0
+    segment: 1.0
     normalize_audio: false
     batch_size: 1
-    num_workers: 8
+    # Windows/本地调试时将 worker 降低，减少数据加载不稳定问题。
+    # num_workers: 8
+    num_workers: 0
     pin_memory: true
     persistent_workers: false
 
 exp:
-  exp_name: TIGER-EchoSet
+  # 使用独立实验名，避免与 EchoSet 的 checkpoint/log 混淆。
+  # exp_name: TIGER-EchoSet
+  exp_name: TIGER-MiniLibriMix
