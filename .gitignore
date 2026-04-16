@@ -12,3 +12,4 @@ tea_debug.log
 /.cursor/
 /Experiments/
 /docs/
+.env

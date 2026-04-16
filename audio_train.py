@@ -50,6 +50,12 @@ parser.add_argument(
     default="local/conf.yml",
     help="Full path to save best validation model",
 )
+parser.add_argument(
+    "--epoch",
+    type=int,
+    default=None,
+    help="Override training epochs (maps to training.epochs / Trainer max_epochs)",
+)
 
 
 def configure_wandb_epoch_metrics(wandb_logger):
@@ -281,4 +287,8 @@ if __name__ == "__main__":
 
     arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)
     # pprint(arg_dic)
+    # If provided, allow CLI to override training epochs from the yaml.
+    if getattr(plain_args, "epoch", None) is not None:
+        if "training" in arg_dic:
+            arg_dic["training"]["epochs"] = plain_args.epoch
     main(arg_dic)
