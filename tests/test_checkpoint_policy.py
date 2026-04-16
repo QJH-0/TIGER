@@ -14,6 +14,7 @@ def test_build_checkpoint_callback_saves_last_each_epoch_and_numbered_ckpts_ever
 
     assert Path(checkpoint.dirpath) == Path("D:/tmp/exp")
     assert checkpoint.filename == "{epoch}"
+    assert checkpoint.monitor == "val/loss_epoch/dataloader_idx_0"
     assert checkpoint.every_n_epochs == 10
     assert checkpoint.save_last is True
     assert checkpoint.save_top_k == 5

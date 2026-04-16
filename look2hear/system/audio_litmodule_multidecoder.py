@@ -57,7 +57,7 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
         #     perturb_prob=1.0
         # )
         # Save lightning"s AttributeDict under self.hparams
-        self.default_monitor = "val/loss_epoch"
+        self.default_monitor = "val/loss_epoch/dataloader_idx_0"
         self.save_hyperparameters(self.config_to_hparams(self.config))
         # self.print(self.audio_model)
         self.validation_step_outputs = []

@@ -86,7 +86,7 @@ def build_checkpoint_callback(checkpoint_dir):
     return ModelCheckpoint(
         checkpoint_dir,
         filename="{epoch}",
-        monitor="val/loss_epoch",
+        monitor="val/loss_epoch/dataloader_idx_0",
         mode="min",
         save_top_k=5,
         verbose=True,

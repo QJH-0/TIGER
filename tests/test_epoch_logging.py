@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock, PropertyMock, patch
 
 import torch
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -99,3 +100,27 @@ def test_configure_wandb_epoch_metrics_uses_epoch_as_step_metric():
     experiment.define_metric.assert_any_call("train/*", step_metric="epoch")
     experiment.define_metric.assert_any_call("val/*", step_metric="epoch")
     experiment.define_metric.assert_any_call("test/*", step_metric="epoch")
+
+
+def test_reduce_on_plateau_uses_validation_metric_with_dataloader_suffix():
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.SGD([parameter], lr=0.1)
+    scheduler = ReduceLROnPlateau(optimizer, patience=1)
+    module = AudioLightningModule(
+        audio_model=lambda wav: wav.unsqueeze(1).repeat(1, 2, 1),
+        optimizer=optimizer,
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.5),
+            "val": lambda est, tgt: torch.tensor(2.5),
+        },
+        scheduler=scheduler,
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {"SpeedAug": False},
+        },
+    )
+
+    optimizers, schedulers = module.configure_optimizers()
+
+    assert optimizers == [optimizer]
+    assert schedulers[0]["monitor"] == "val/loss_epoch/dataloader_idx_0"
