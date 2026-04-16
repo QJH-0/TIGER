@@ -38,7 +38,8 @@ training:
   parallel: ddp
   epochs: 150
   early_stop:
-    monitor: val_loss/dataloader_idx_0
+    # Lightning 实际记录的验证 loss 指标名是 val/loss_epoch/dataloader_idx_0
+    monitor: val/loss_epoch/dataloader_idx_0
     mode: min
     patience: 20
     verbose: true

@@ -216,7 +216,7 @@ def main(config):
     print_only("Instantiating ModelCheckpoint")
     callbacks = []
     checkpoint_dir = os.path.join(exp_dir)
-    # 根据 val_loss/dataloader_idx_0 监控最优模型，并保留 top-k。
+    # 根据 val/loss_epoch 监控最优模型，并保留 top-k。
     checkpoint = build_checkpoint_callback(checkpoint_dir)
     callbacks.append(checkpoint)
 
