@@ -72,26 +72,92 @@ parser.add_argument(
 )
 
 
-def configure_wandb_epoch_metrics(wandb_logger):
-    # 统一把 W&B 的横轴绑定到 epoch，避免训练/验证/测试指标各自用不同 step。
+def flatten_config(config, parent_key="", sep="_"):
+    items = []
+    for key, value in config.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, MutableMapping):
+            items.extend(flatten_config(value, new_key, sep=sep).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
+
+
+def sanitize_wandb_config(config):
+    sanitized = {}
+    for key, value in flatten_config(config).items():
+        if value is None:
+            sanitized[key] = "None"
+        elif isinstance(value, Tensor):
+            sanitized[key] = value.tolist()
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
+def _slugify_wandb_name(value):
+    text = str(value).strip().replace("_", "-").replace(" ", "-")
+    return "".join(ch.lower() for ch in text if ch.isalnum() or ch in "-.")
+
+
+def build_wandb_project_name(config):
+    return "tiger-speech-separation"
+
+
+def build_wandb_run_name(config):
+    audionet_name = config.get("audionet", {}).get("audionet_name", "model")
+    datamodule = config.get("datamodule", {})
+    data_name = datamodule.get("data_name", "dataset")
+    data_config = datamodule.get("data_config", {})
+    batch_size = data_config.get("batch_size", "na")
+    segment = data_config.get("segment", "na")
+    exp_name = config.get("exp", {}).get("exp_name")
+
+    parts = [
+        _slugify_wandb_name(audionet_name),
+        _slugify_wandb_name(data_name),
+        f"bs{batch_size}",
+        f"seg{segment}",
+    ]
+    if exp_name:
+        parts.append(_slugify_wandb_name(exp_name))
+    return "-".join(parts)
+
+
+def save_wandb_run_metadata(wandb_logger, exp_dir):
     experiment = wandb_logger.experiment
-    experiment.define_metric("epoch")
-    experiment.define_metric("train/*", step_metric="epoch")
-    experiment.define_metric("val/*", step_metric="epoch")
-    experiment.define_metric("test/*", step_metric="epoch")
+    metadata = {
+        "entity": getattr(experiment, "entity", None),
+        "project": getattr(experiment, "project", None),
+        "run_id": getattr(experiment, "id", None),
+        "run_name": getattr(experiment, "name", None),
+        "url": getattr(experiment, "url", None),
+    }
+    with open(os.path.join(exp_dir, "wandb_run.json"), "w", encoding="utf-8") as outfile:
+        json.dump(metadata, outfile, indent=2)
+
+
+def configure_wandb_epoch_metrics(wandb_logger):
+    # 统一把核心训练指标绑定到 epoch，并隐藏自动生成工作区里无关的辅助横轴。
+    experiment = wandb_logger.experiment
+    experiment.define_metric("epoch", hidden=True)
+    experiment.define_metric("trainer/global_step", hidden=True)
+    experiment.define_metric("train/loss", step_metric="epoch")
+    experiment.define_metric("train/learning_rate", step_metric="epoch")
+    experiment.define_metric("val/loss", step_metric="epoch")
+    experiment.define_metric("val/si_snr", step_metric="epoch")
 
 
 def build_checkpoint_callback(checkpoint_dir):
-    # 训练中始终保留 last.ckpt 用于断点续训，编号 checkpoint 仅每 10 轮落盘一次。
+    # 训练中只保留两个 checkpoint：last.ckpt（续训）和最优 best（验证集最小 val/loss）。
     return ModelCheckpoint(
         checkpoint_dir,
-        filename="{epoch}",
-        monitor="val/loss_epoch/dataloader_idx_0",
+        filename="best",
+        monitor="val/loss",
         mode="min",
-        save_top_k=5,
+        save_top_k=1,
         verbose=True,
         save_last=True,
-        every_n_epochs=10,
     )
 
 
@@ -113,6 +179,25 @@ def resolve_resume_checkpoint_path(config, exp_dir):
         return os.path.join(exp_dir, "last.ckpt")
 
     return None
+
+
+def resolve_export_checkpoint_path(checkpoint_callback, exp_dir):
+    best_model_path = getattr(checkpoint_callback, "best_model_path", "") or ""
+    if best_model_path:
+        return best_model_path
+
+    last_model_path = getattr(checkpoint_callback, "last_model_path", "") or ""
+    if last_model_path and os.path.exists(last_model_path):
+        return last_model_path
+
+    fallback_last = os.path.join(exp_dir, "last.ckpt")
+    if os.path.exists(fallback_last):
+        return fallback_last
+
+    raise FileNotFoundError(
+        "No checkpoint available for exporting best_model.pth. "
+        "Neither best_model_path nor last.ckpt exists."
+    )
 
 def main(config):
     """
@@ -237,12 +322,14 @@ def main(config):
     os.makedirs(os.path.join(logger_dir, config["exp"]["exp_name"]), exist_ok=True)
     # comet_logger = TensorBoardLogger(logger_dir, name=config["exp"]["exp_name"])
     comet_logger = WandbLogger(
-            name=config["exp"]["exp_name"], 
+            name=build_wandb_run_name(config), 
             save_dir=os.path.join(logger_dir, config["exp"]["exp_name"]), 
-            project="Real-work-dataset",
+            project=build_wandb_project_name(config),
+            config=sanitize_wandb_config(config),
             # offline=True
     )
     configure_wandb_epoch_metrics(comet_logger)
+    save_wandb_run_metadata(comet_logger, exp_dir)
 
     # 单卡走默认策略，多卡保留 DDP，避免单卡场景策略配置报错。
     # limit_train_batches=1.0 用于完整训练；若想快速调试可以改成更小比例。
@@ -273,7 +360,8 @@ def main(config):
         json.dump(best_k, f, indent=0)
 
     # 将 best checkpoint 的 state_dict 加载回 system，然后把模型移到 CPU 并序列化音频模型权重。
-    state_dict = torch.load(checkpoint.best_model_path)
+    export_ckpt_path = resolve_export_checkpoint_path(checkpoint, exp_dir)
+    state_dict = torch.load(export_ckpt_path)
     system.load_state_dict(state_dict=state_dict["state_dict"])
     system.cpu()
 

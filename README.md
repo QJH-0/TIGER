@@ -14,12 +14,36 @@
 git clone https://github.com/JusperLee/TIGER.git && cd TIGER && pip install -r requirements.txt
 ```
 
-上面这一步是**首次安装依赖**：在同一个 Python 环境下后续训练/评估无需重复执行；只有在你修改了 `requirements.txt` 或切换到新的虚拟环境时，才需要重新安装。
-
+上面这一步是**首次安装依赖**：在同一个 Python 环境下后续训练/评估无需重复执行；只有在你修改了 `requirements.txt` 或切换到新的虚拟环境时，才需要重新安装。  
 W&B 首次使用需要登录一次：
 
 ```bash
 wandb login
+```
+
+W&B 命名约定：
+
+- `project` 固定为 `tiger-speech-separation`
+- `run name` 自动生成为 `<model>-<dataset>-bs<batch>-seg<segment>-<exp_name>`
+- 训练期指标统一按 `train/*`、`val/*` 分组
+- 当前默认上报的核心指标为 `train/loss`、`train/learning_rate`、`val/loss`、`val/si_snr`
+- W&B 横轴统一绑定到 `epoch`
+- 上传到 W&B 的配置会被展平成单层 key，并统一使用下划线，例如 `training_epochs`、`optimizer_lr`、`datamodule_data_config_batch_size`
+
+说明：
+
+- 训练阶段只使用验证集 `val` 做早停和 checkpoint 监控
+- `test` 集不再参与 `trainer.fit()` 期间的进度条和 W&B 日志
+- 最终测试统一通过 `python audio_test.py --conf_dir ...` 单独执行
+- 如果 W&B 项目里已经存在旧的自动面板，需要在项目页面把 Workspace 从 `Automatic` 切到 `Manual`
+- Manual Workspace 里只保留这 4 张训练期图：`train/loss`、`train/learning_rate`、`val/loss`、`val/si_snr`
+- 若旧项目里某些图仍显示 `trainer/global_step`，在面板编辑页把 X-Axis 改成 `epoch` 后保存；新 run 会优先按代码里的 `epoch` 定义生成
+
+示例：
+
+```text
+project  = tiger-speech-separation
+run name = tiger-libri2mixmoduleremix-bs4-seg3.0-tiger-minilibrimix
 ```
 
 ## 3. 默认数据与索引生成（MiniLibriMix）
@@ -34,11 +58,31 @@ wandb login
 python DataPreProcess/process_librimix.py --in_dir "D:/Paper/datasets/MiniLibriMix" --out_dir "D:/Paper/TIGER/DataPreProcess/MiniLibriMix" --splits train val test --speakers mix_both s1 s2
 ```
 
-生成后目录应为：
+生成完成后目录应为：
 
 - `DataPreProcess/MiniLibriMix/train/{mix_both.json,s1.json,s2.json}`
 - `DataPreProcess/MiniLibriMix/val/{mix_both.json,s1.json,s2.json}`
 - `DataPreProcess/MiniLibriMix/test/{mix_both.json,s1.json,s2.json}`
+
+如果你只想快速验证训练和测试流程是否正常，可以生成一个更小的冒烟测试索引：
+
+```bash
+python DataPreProcess/build_mini_librimix_index.py --in_dir "D:/Paper/datasets/MiniLibriMix" --out_dir "D:/Paper/TIGER/DataPreProcess/MiniLibriMix-mini"
+```
+
+该脚本会扫描同一份原始 MiniLibriMix 目录，并生成固定大小的小索引：
+
+- `train=20`
+- `val=10`
+- `test=10`
+
+输出目录结构为：
+
+- `DataPreProcess/MiniLibriMix-mini/train/{mix_both.json,s1.json,s2.json}`
+- `DataPreProcess/MiniLibriMix-mini/val/{mix_both.json,s1.json,s2.json}`
+- `DataPreProcess/MiniLibriMix-mini/test/{mix_both.json,s1.json,s2.json}`
+
+JSON 格式与全量索引一致。要使用这套小索引，只需要把训练配置里的 `train_dir`、`valid_dir`、`test_dir` 改成 `DataPreProcess/MiniLibriMix-mini/...` 对应路径。
 
 ## 4. Kaggle T4x2 训练流程（MiniLibriMix）
 
@@ -86,13 +130,13 @@ python audio_train.py --conf_dir configs/tiger-large-kaggle-t4x2.yml
 训练：
 
 ```bash
-python audio_train.py --conf_dir configs/tiger-large.yml
+python audio_train.py --conf_dir configs/tiger-small.yml
 ```
 
 评估：
 
 ```bash
-python audio_test.py --conf_dir configs/tiger-large.yml
+python audio_test.py --conf_dir configs/tiger-small.yml
 ```
 
 训练产物默认输出到：
@@ -108,7 +152,7 @@ python audio_test.py --conf_dir configs/tiger-large.yml
 训练保存策略：
 
 - `last.ckpt` 每轮更新，用于断点续训
-- 按 epoch 命名的 checkpoint 每 10 轮保存一次
+- 仅保留 1 个最优 checkpoint（按 `val/loss` 监控，文件名为 `best.ckpt`）
 - `audio_test.py` 默认加载 `best_model.pth` 做评估；断点续训应加载 `.ckpt`
 
 ## 7. 推理示例
@@ -123,7 +167,7 @@ python inference_dnr.py --audio_path test/test_mixture_466.wav
 
 ## 8. 常见问题
 
-- **找不到数据**：确认 `DataPreProcess/MiniLibriMix/*` 已生成且配置路径一致。
+- **找不到数据**：确认 `DataPreProcess/MiniLibriMix/`* 已生成且配置路径一致。
 - **W&B 报错**：执行 `wandb login`，或在服务器中设置 `WANDB_API_KEY`。
 - **显存不足**：先减小 `batch_size`，再降低模型规模参数。
 

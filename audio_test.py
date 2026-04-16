@@ -13,11 +13,13 @@ from pprint import pprint
 from scipy.io import wavfile
 import warnings
 import torchaudio
+import wandb
 warnings.filterwarnings("ignore")
 import look2hear.models
 import look2hear.datas
 from look2hear.metrics import MetricsTracker
 from look2hear.utils import tensors_to_device, RichProgressBarTheme, MyMetricsTextColumn, BatchesProcessedColumn
+from audio_train import build_wandb_project_name
 
 from rich.progress import (
     BarColumn,
@@ -57,6 +59,45 @@ def resolve_eval_model_source(config, exp_dir):
         return {"source_type": "pretrained", "path": requested_model}
 
     return {"source_type": "best", "path": os.path.join(exp_dir, "best_model.pth")}
+
+
+def build_test_summary(metrics_row):
+    return {
+        "test/sdr": float(metrics_row["sdr"]),
+        "test/sdr_i": float(metrics_row["sdr_i"]),
+        "test/si_snr": float(metrics_row["si-snr"]),
+        "test/si_snr_i": float(metrics_row["si-snr_i"]),
+    }
+
+
+def print_test_summary(summary, print_fn=print):
+    print_fn("Test Summary")
+    for key, value in summary.items():
+        print_fn(f"{key}: {value:.3f}")
+
+
+def load_wandb_run_metadata(exp_dir):
+    metadata_path = os.path.join(exp_dir, "wandb_run.json")
+    if not os.path.exists(metadata_path):
+        return None
+    with open(metadata_path, "r", encoding="utf-8") as infile:
+        return json.load(infile)
+
+
+def log_test_summary_to_wandb(summary, train_conf, exp_dir, wandb_module=wandb):
+    metadata = load_wandb_run_metadata(exp_dir)
+    if not metadata:
+        raise FileNotFoundError(f"W&B run metadata not found in {exp_dir}")
+
+    entity = metadata.get("entity")
+    project = metadata.get("project") or build_wandb_project_name(train_conf)
+    run_id = metadata.get("run_id")
+    if not entity or not project or not run_id:
+        raise ValueError("Incomplete W&B run metadata; expected entity, project, and run_id.")
+
+    api = wandb_module.Api()
+    run = api.run(f"{entity}/{project}/{run_id}")
+    run.summary.update(summary)
 
 
 def main(config):
@@ -215,7 +256,13 @@ def main(config):
                     )
                 # if idx % 50 == 0:
                 #     metricscolumn.update(metrics.update())
-    metrics.final()
+    metrics_row = metrics.final()
+    summary = build_test_summary(metrics_row)
+    print_test_summary(summary)
+    try:
+        log_test_summary_to_wandb(summary, train_conf, exp_dir)
+    except Exception as exc:
+        print(f"W&B logging skipped: {exc}")
 
 
 if __name__ == "__main__":

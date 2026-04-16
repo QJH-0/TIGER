@@ -36,8 +36,8 @@ training:
   # epochs: 500
   epochs: 5
   early_stop:
-    # Lightning 实际记录的验证 loss 指标名是 val/loss_epoch/dataloader_idx_0
-    monitor: val/loss_epoch/dataloader_idx_0
+    # Lightning 训练期只使用验证集，因此 monitor 直接使用 val/loss
+    monitor: val/loss
     mode: min
     patience: 20
     verbose: true
@@ -65,9 +65,9 @@ datamodule:
     # train_dir: DataPreProcess/EchoSet/train
     # valid_dir: DataPreProcess/EchoSet/val
     # test_dir: DataPreProcess/EchoSet/test
-    train_dir: DataPreProcess/MiniLibriMix/train
-    valid_dir: DataPreProcess/MiniLibriMix/val
-    test_dir: DataPreProcess/MiniLibriMix/test
+    train_dir: DataPreProcess/MiniLibriMix-mini/train
+    valid_dir: DataPreProcess/MiniLibriMix-mini/val
+    test_dir: DataPreProcess/MiniLibriMix-mini/test
     n_src: 2
     sample_rate: 16000
     # 使用更短切片，加快本地 sanity run 速度。

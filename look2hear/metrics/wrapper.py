@@ -90,3 +90,4 @@ class MetricsTracker:
         # }
         # self.writer.writerow(row)
         self.results_csv.close()
+        return row

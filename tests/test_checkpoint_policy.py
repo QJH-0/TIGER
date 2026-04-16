@@ -5,19 +5,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from audio_test import resolve_eval_model_source
-from audio_train import build_checkpoint_callback, resolve_resume_checkpoint_path
+from audio_train import (
+    build_checkpoint_callback,
+    resolve_export_checkpoint_path,
+    resolve_resume_checkpoint_path,
+)
 
 
-def test_build_checkpoint_callback_saves_last_each_epoch_and_numbered_ckpts_every_10():
-    # 断言 checkpoint 策略符合当前约定：last.ckpt 高频更新，编号 ckpt 低频保存。
+def test_build_checkpoint_callback_keeps_only_last_and_single_best():
+    # 断言 checkpoint 策略符合当前约定：仅保留 last.ckpt 与单个 best.ckpt。
     checkpoint = build_checkpoint_callback("D:/tmp/exp")
 
     assert Path(checkpoint.dirpath) == Path("D:/tmp/exp")
-    assert checkpoint.filename == "{epoch}"
-    assert checkpoint.monitor == "val/loss_epoch/dataloader_idx_0"
-    assert checkpoint.every_n_epochs == 10
+    assert checkpoint.filename == "best"
+    assert checkpoint.monitor == "val/loss"
+    assert checkpoint.every_n_epochs == 1
     assert checkpoint.save_last is True
-    assert checkpoint.save_top_k == 5
+    assert checkpoint.save_top_k == 1
 
 
 def test_resolve_resume_checkpoint_path_prefers_last_ckpt_when_resume_enabled(tmp_path):
@@ -67,3 +71,23 @@ def test_resolve_eval_model_source_supports_pretrained_override(tmp_path):
     source = resolve_eval_model_source(config, str(exp_dir))
 
     assert source == {"source_type": "pretrained", "path": "JusperLee/TIGER-speech"}
+
+
+def test_resolve_export_checkpoint_path_prefers_best_model_path(tmp_path):
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    best_ckpt = exp_dir / "epoch=9.ckpt"
+    best_ckpt.write_text("checkpoint")
+    checkpoint = types.SimpleNamespace(best_model_path=str(best_ckpt), last_model_path="")
+
+    assert resolve_export_checkpoint_path(checkpoint, str(exp_dir)) == str(best_ckpt)
+
+
+def test_resolve_export_checkpoint_path_falls_back_to_last_ckpt(tmp_path):
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    last_ckpt = exp_dir / "last.ckpt"
+    last_ckpt.write_text("checkpoint")
+    checkpoint = types.SimpleNamespace(best_model_path="", last_model_path=str(last_ckpt))
+
+    assert resolve_export_checkpoint_path(checkpoint, str(exp_dir)) == str(last_ckpt)

@@ -57,12 +57,16 @@ class AudioLightningModule(pl.LightningModule):
             perturb_prob=1.0
         )
         # Save lightning"s AttributeDict under self.hparams
-        self.default_monitor = "val/loss_epoch/dataloader_idx_0"
+        self.default_monitor = "val/loss"
         self.save_hyperparameters(self.config_to_hparams(self.config))
         # self.print(self.audio_model)
         self.validation_step_outputs = []
-        self.test_step_outputs = []
-        
+
+    def _normalize_scheduler_monitor(self, monitor):
+        # 兼容旧配置中遗留的 monitor 命名。
+        if monitor in {"val/loss", "val/loss_epoch", "val/loss/dataloader_idx_0"}:
+            return self.default_monitor
+        return monitor
 
     def forward(self, wav, mouth=None):
         """Applies forward pass of the model.
@@ -104,7 +108,7 @@ class AudioLightningModule(pl.LightningModule):
         loss = self.loss_func["train"](est_sources, targets)
 
         self.log(
-            "train/loss_epoch",
+            "train/loss",
             loss,
             on_step=False,
             on_epoch=True,
@@ -115,48 +119,23 @@ class AudioLightningModule(pl.LightningModule):
 
         return {"loss": loss}
 
+    def validation_step(self, batch, batch_nb):
+        mixtures, targets, _ = batch
+        est_sources = self(mixtures)
+        loss = self.loss_func["val"](est_sources, targets)
+        self.log(
+            "val/loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+            logger=True,
+        )
 
-    def validation_step(self, batch, batch_nb, dataloader_idx):
-        # cal val loss
-        if dataloader_idx == 0:
-            mixtures, targets, _ = batch
-            # print(mixtures.shape)
-            est_sources = self(mixtures)
-            loss = self.loss_func["val"](est_sources, targets)
-            self.log(
-                "val/loss_epoch",
-                loss,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-                logger=True,
-            )
-            
-            self.validation_step_outputs.append(loss)
-            
-            return {"val_loss": loss}
+        self.validation_step_outputs.append(loss)
 
-        # cal test loss
-        # 原逻辑：每 10 个 epoch 才在 dataloader_idx == 1 上计算 test loss
-        # if (self.trainer.current_epoch) % 10 == 0 and dataloader_idx == 1:
-        # 当前逻辑：每个 epoch 都计算 test loss
-        if dataloader_idx == 1:
-            mixtures, targets, _ = batch
-            # print(mixtures.shape)
-            est_sources = self(mixtures)
-            tloss = self.loss_func["val"](est_sources, targets)
-            self.log(
-                "test/loss_epoch",
-                tloss,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-                logger=True,
-            )
-            self.test_step_outputs.append(tloss)
-            return {"test_loss": tloss}
+        return {"val_loss": loss}
 
     def on_validation_epoch_end(self):
         # val
@@ -172,7 +151,7 @@ class AudioLightningModule(pl.LightningModule):
             logger=True,
         )
         self.log(
-            "train/lr_epoch",
+            "train/learning_rate",
             self.optimizer.param_groups[0]["lr"],
             on_step=False,
             on_epoch=True,
@@ -181,7 +160,7 @@ class AudioLightningModule(pl.LightningModule):
             logger=True,
         )
         self.log(
-            "val/pit_sisnr_epoch",
+            "val/si_snr",
             -val_loss,
             on_step=False,
             on_epoch=True,
@@ -190,29 +169,7 @@ class AudioLightningModule(pl.LightningModule):
             logger=True,
         )
 
-        # test
-        # 原逻辑：仅在每 10 个 epoch 记录一次 test 指标
-        # if (self.trainer.current_epoch) % 10 == 0:
-        #     avg_loss = torch.stack(self.test_step_outputs).mean()
-        #     test_loss = torch.mean(self.all_gather(avg_loss))
-        #     self.logger.experiment.log(
-        #         {"test_pit_sisnr": -test_loss, "epoch": self.current_epoch}
-        #     )
-        # 当前逻辑：每个 epoch 只要有 test 输出就记录 test 指标
-        if self.test_step_outputs:
-            avg_loss = torch.stack(self.test_step_outputs).mean()
-            test_loss = torch.mean(self.all_gather(avg_loss))
-            self.log(
-                "test/pit_sisnr_epoch",
-                -test_loss,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-                logger=True,
-            )
         self.validation_step_outputs.clear()  # free memory
-        self.test_step_outputs.clear()  # free memory
 
     def configure_optimizers(self):
         """Initialize optimizers, batch-wise and epoch-wise schedulers."""
@@ -229,7 +186,10 @@ class AudioLightningModule(pl.LightningModule):
                     sched = {"scheduler": sched, "monitor": self.default_monitor}
                 epoch_schedulers.append(sched)
             else:
-                sched.setdefault("monitor", self.default_monitor)
+                # 兼容旧配置里未带 dataloader 后缀的 monitor，避免 ReduceLROnPlateau 在 epoch 结束时报错。
+                sched["monitor"] = self._normalize_scheduler_monitor(
+                    sched.get("monitor", self.default_monitor)
+                )
                 sched.setdefault("frequency", 1)
                 # Backward compat
                 if sched["interval"] == "batch":
@@ -253,7 +213,7 @@ class AudioLightningModule(pl.LightningModule):
 
     def val_dataloader(self):
         """Validation dataloader"""
-        return [self.val_loader, self.test_loader]
+        return self.val_loader
 
     def on_save_checkpoint(self, checkpoint):
         """Overwrite if you want to save more things in the checkpoint."""
