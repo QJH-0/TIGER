@@ -14,6 +14,8 @@
 git clone https://github.com/JusperLee/TIGER.git && cd TIGER && pip install -r requirements.txt
 ```
 
+上面这一步是**首次安装依赖**：在同一个 Python 环境下后续训练/评估无需重复执行；只有在你修改了 `requirements.txt` 或切换到新的虚拟环境时，才需要重新安装。
+
 W&B 首次使用需要登录一次：
 
 ```bash

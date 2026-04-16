@@ -57,6 +57,20 @@ parser.add_argument(
     help="Override training epochs (maps to training.epochs / Trainer max_epochs)",
 )
 
+parser.add_argument(
+    "--batch_size",
+    type=int,
+    default=None,
+    help="Override datamodule.data_config.batch_size (per GPU/rank).",
+)
+
+parser.add_argument(
+    "--segment",
+    type=float,
+    default=None,
+    help="Override datamodule.data_config.segment in seconds (e.g. 3.0 -> 48000 @16kHz).",
+)
+
 
 def configure_wandb_epoch_metrics(wandb_logger):
     # 统一把 W&B 的横轴绑定到 epoch，避免训练/验证/测试指标各自用不同 step。
@@ -243,7 +257,7 @@ def main(config):
         gradient_clip_val=5.0,
         logger=comet_logger,
         sync_batchnorm=True,
-        # precision="bf16-mixed",
+        precision="16-mixed",
         # num_sanity_val_steps=0,
         # sync_batchnorm=True,
         # fast_dev_run=True,
@@ -291,4 +305,15 @@ if __name__ == "__main__":
     if getattr(plain_args, "epoch", None) is not None:
         if "training" in arg_dic:
             arg_dic["training"]["epochs"] = plain_args.epoch
+
+    # CLI overrides for datamodule.*
+    # NOTE: Our YAML config is multi-level (datamodule -> data_config -> {batch_size, segment}),
+    # so we explicitly wire these overrides instead of relying on prepare_parser_from_dict.
+    if getattr(plain_args, "batch_size", None) is not None:
+        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
+            arg_dic["datamodule"]["data_config"]["batch_size"] = plain_args.batch_size
+    if getattr(plain_args, "segment", None) is not None:
+        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
+            arg_dic["datamodule"]["data_config"]["segment"] = plain_args.segment
+
     main(arg_dic)
