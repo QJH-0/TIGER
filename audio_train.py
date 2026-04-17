@@ -126,12 +126,22 @@ def build_wandb_run_name(config):
 
 def save_wandb_run_metadata(wandb_logger, exp_dir):
     experiment = wandb_logger.experiment
+
+    def _resolve_experiment_field(field_name):
+        value = getattr(experiment, field_name, None)
+        if callable(value):
+            try:
+                value = value()
+            except TypeError:
+                return None
+        return value
+
     metadata = {
-        "entity": getattr(experiment, "entity", None),
-        "project": getattr(experiment, "project", None),
-        "run_id": getattr(experiment, "id", None),
-        "run_name": getattr(experiment, "name", None),
-        "url": getattr(experiment, "url", None),
+        "entity": _resolve_experiment_field("entity"),
+        "project": _resolve_experiment_field("project"),
+        "run_id": _resolve_experiment_field("id"),
+        "run_name": _resolve_experiment_field("name"),
+        "url": _resolve_experiment_field("url"),
     }
     with open(os.path.join(exp_dir, "wandb_run.json"), "w", encoding="utf-8") as outfile:
         json.dump(metadata, outfile, indent=2)

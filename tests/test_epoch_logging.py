@@ -34,6 +34,7 @@ from audio_train import (
     build_wandb_project_name,
     build_wandb_run_name,
     configure_wandb_epoch_metrics,
+    save_wandb_run_metadata,
     sanitize_wandb_config,
 )
 
@@ -110,6 +111,24 @@ def test_configure_wandb_epoch_metrics_uses_epoch_as_step_metric():
     assert "train/*" not in defined_metrics
     assert "val/*" not in defined_metrics
     assert "test/*" not in defined_metrics
+
+
+def test_save_wandb_run_metadata_serializes_callable_url(tmp_path):
+    experiment = types.SimpleNamespace(
+        entity="demo-entity",
+        project="demo-project",
+        id="abc123",
+        name="demo-run",
+        url=lambda: "https://wandb.ai/demo-entity/demo-project/runs/abc123",
+    )
+    logger = types.SimpleNamespace(experiment=experiment)
+
+    save_wandb_run_metadata(logger, str(tmp_path))
+
+    metadata_path = tmp_path / "wandb_run.json"
+    saved = metadata_path.read_text(encoding="utf-8")
+
+    assert '"url": "https://wandb.ai/demo-entity/demo-project/runs/abc123"' in saved
 
 
 def test_sanitize_wandb_config_flattens_nested_keys_with_underscores():
