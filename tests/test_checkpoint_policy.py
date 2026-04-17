@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audio_test import resolve_eval_model_source
 from audio_train import (
     build_checkpoint_callback,
+    resolve_cli_resume_override,
     resolve_export_checkpoint_path,
     resolve_resume_checkpoint_path,
 )
@@ -41,6 +42,33 @@ def test_resolve_resume_checkpoint_path_uses_explicit_ckpt_path():
     config = {"main_args": {"resume_from_checkpoint": "D:/custom/model.ckpt"}}
 
     assert resolve_resume_checkpoint_path(config, "D:/tmp/exp") == "D:/custom/model.ckpt"
+
+
+def test_resolve_cli_resume_override_uses_last_when_resume_flag_enabled():
+    plain_args = types.SimpleNamespace(resume=True, resume_ckpt=None)
+
+    assert resolve_cli_resume_override(plain_args) is True
+
+
+def test_resolve_cli_resume_override_prefers_explicit_resume_ckpt():
+    plain_args = types.SimpleNamespace(resume=True, resume_ckpt="D:/custom/from-cli.ckpt")
+
+    assert resolve_cli_resume_override(plain_args) == "D:/custom/from-cli.ckpt"
+
+
+def test_resolve_resume_checkpoint_path_uses_cli_merged_value_over_original_config(tmp_path):
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    last_ckpt = exp_dir / "last.ckpt"
+    last_ckpt.write_text("checkpoint")
+
+    config = {
+        "main_args": {
+            "resume_from_checkpoint": True,
+        }
+    }
+
+    assert resolve_resume_checkpoint_path(config, str(exp_dir)) == str(last_ckpt)
 
 
 def test_resolve_eval_model_source_defaults_to_best_model(tmp_path):

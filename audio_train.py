@@ -70,6 +70,17 @@ parser.add_argument(
     default=None,
     help="Override datamodule.data_config.segment in seconds (e.g. 3.0 -> 48000 @16kHz).",
 )
+parser.add_argument(
+    "--resume",
+    action="store_true",
+    help="Resume training from the current experiment's last.ckpt.",
+)
+parser.add_argument(
+    "--resume_ckpt",
+    type=str,
+    default=None,
+    help="Resume training from a specific checkpoint path, or use 'last'.",
+)
 
 
 def flatten_config(config, parent_key="", sep="_"):
@@ -187,6 +198,18 @@ def resolve_resume_checkpoint_path(config, exp_dir):
     if resume_setting is True:
         # 简写为 true 时，默认恢复当前实验目录下的 last.ckpt。
         return os.path.join(exp_dir, "last.ckpt")
+
+    return None
+
+
+def resolve_cli_resume_override(plain_args):
+    # CLI 优先级高于配置：显式给出 checkpoint 时直接使用，否则 --resume 恢复到 last.ckpt。
+    resume_ckpt = getattr(plain_args, "resume_ckpt", None)
+    if resume_ckpt:
+        return resume_ckpt
+
+    if getattr(plain_args, "resume", False):
+        return True
 
     return None
 
@@ -413,5 +436,10 @@ if __name__ == "__main__":
     if getattr(plain_args, "segment", None) is not None:
         if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
             arg_dic["datamodule"]["data_config"]["segment"] = plain_args.segment
+
+    cli_resume_override = resolve_cli_resume_override(plain_args)
+    if cli_resume_override is not None:
+        arg_dic.setdefault("main_args", {})
+        arg_dic["main_args"]["resume_from_checkpoint"] = cli_resume_override
 
     main(arg_dic)

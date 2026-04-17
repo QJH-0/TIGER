@@ -133,6 +133,15 @@ python audio_train.py --conf_dir configs/tiger-large-kaggle-t4x2.yml
 python audio_train.py --conf_dir configs/tiger-small.yml
 ```
 
+从断点继续训练：
+```bash
+# 恢复当前实验目录下的 last.ckpt
+python audio_train.py --conf_dir configs/tiger-small.yml --resume
+
+# 显式指定 checkpoint 路径，或写成 --resume_ckpt last
+python audio_train.py --conf_dir configs/tiger-small.yml --resume_ckpt Experiments/checkpoint/TIGER-MiniLibriMix/last.ckpt
+```
+
 评估：
 
 ```bash
@@ -154,6 +163,7 @@ python audio_test.py --conf_dir configs/tiger-small.yml
 - `last.ckpt` 每轮更新，用于断点续训
 - 仅保留 1 个最优 checkpoint（按 `val/loss` 监控，文件名为 `best.ckpt`）
 - `audio_test.py` 默认加载 `best_model.pth` 做评估；断点续训应加载 `.ckpt`
+- 可在配置中设置 `main_args.resume_from_checkpoint: true`，也可通过命令行 `--resume` / `--resume_ckpt` 控制；命令行优先级更高
 
 ## 7. 推理示例
 
