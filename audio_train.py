@@ -31,7 +31,7 @@ warnings.filterwarnings("ignore")
 
 import wandb
 #手动登录
-# wandb.login()
+wandb.login()
 
 """
 TIGER 训练脚本。
