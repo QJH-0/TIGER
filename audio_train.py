@@ -214,6 +214,48 @@ def resolve_cli_resume_override(plain_args):
     return None
 
 
+def extract_resume_progress(checkpoint):
+    epoch = checkpoint.get("epoch")
+    global_step = checkpoint.get("global_step")
+
+    if epoch is None:
+        return None
+
+    completed_epochs = int(epoch) + 1
+    progress = {
+        "completed_epochs": completed_epochs,
+        "next_epoch": completed_epochs + 1,
+        "global_step": int(global_step) if global_step is not None else None,
+    }
+    return progress
+
+
+def build_resume_summary_message(resume_ckpt_path, checkpoint):
+    if not resume_ckpt_path:
+        return None
+
+    progress = extract_resume_progress(checkpoint)
+    if progress is None:
+        return f"Resuming from checkpoint {resume_ckpt_path}: epoch metadata unavailable"
+
+    return (
+        f"Resuming from checkpoint {resume_ckpt_path}: "
+        f"completed_epochs={progress['completed_epochs']}, "
+        f"next_epoch={progress['next_epoch']}, "
+        f"global_step={progress['global_step']}"
+    )
+
+
+def log_resume_checkpoint_status(resume_ckpt_path):
+    if not resume_ckpt_path:
+        return
+
+    checkpoint = torch.load(resume_ckpt_path, map_location="cpu")
+    message = build_resume_summary_message(resume_ckpt_path, checkpoint)
+    if message:
+        print_only(message)
+
+
 def resolve_export_checkpoint_path(checkpoint_callback, exp_dir):
     best_model_path = getattr(checkpoint_callback, "best_model_path", "") or ""
     if best_model_path:
@@ -383,6 +425,7 @@ def main(config):
         # fast_dev_run=True,
     )
     resume_ckpt_path = resolve_resume_checkpoint_path(config, exp_dir)
+    log_resume_checkpoint_status(resume_ckpt_path)
     # 恢复训练时把 ckpt_path 交给 Trainer；非恢复场景传 None 即可。
     trainer.fit(system, ckpt_path=resume_ckpt_path)
     print_only("Finished Training")

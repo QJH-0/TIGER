@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audio_test import resolve_eval_model_source
 from audio_train import (
     build_checkpoint_callback,
+    build_resume_summary_message,
+    extract_resume_progress,
     resolve_cli_resume_override,
     resolve_export_checkpoint_path,
     resolve_resume_checkpoint_path,
@@ -119,3 +121,36 @@ def test_resolve_export_checkpoint_path_falls_back_to_last_ckpt(tmp_path):
     checkpoint = types.SimpleNamespace(best_model_path="", last_model_path=str(last_ckpt))
 
     assert resolve_export_checkpoint_path(checkpoint, str(exp_dir)) == str(last_ckpt)
+
+
+def test_extract_resume_progress_reports_completed_and_next_epoch_from_checkpoint():
+    checkpoint = {
+        "epoch": 7,
+        "global_step": 2800,
+    }
+
+    progress = extract_resume_progress(checkpoint)
+
+    assert progress == {
+        "completed_epochs": 8,
+        "next_epoch": 9,
+        "global_step": 2800,
+    }
+
+
+def test_build_resume_summary_message_includes_checkpoint_progress():
+    checkpoint = {
+        "epoch": 7,
+        "global_step": 2800,
+    }
+
+    message = build_resume_summary_message("D:/tmp/exp/last.ckpt", checkpoint)
+
+    assert message == (
+        "Resuming from checkpoint D:/tmp/exp/last.ckpt: "
+        "completed_epochs=8, next_epoch=9, global_step=2800"
+    )
+
+
+def test_build_resume_summary_message_returns_none_without_checkpoint_path():
+    assert build_resume_summary_message(None, {"epoch": 7, "global_step": 2800}) is None
