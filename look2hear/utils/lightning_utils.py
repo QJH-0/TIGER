@@ -114,3 +114,15 @@ class MyRichProgressBar(RichProgressBar):
             self.progress.start()
             # progress has started
             self._progress_stopped = False
+
+    def _get_train_description(self, current_epoch: int) -> str:
+        # Lightning 的 current_epoch 为「已完成的 epoch 计数」；这里按人类习惯显示 1..max_epochs。
+        max_e = self.trainer.max_epochs
+        if max_e is not None:
+            display = min(current_epoch + 1, max_e)
+            train_description = f"Epoch {display}/{max_e}"
+        else:
+            train_description = f"Epoch {current_epoch + 1}"
+        if len(self.validation_description) > len(train_description):
+            train_description = f"{train_description:{len(self.validation_description)}}"
+        return train_description

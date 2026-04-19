@@ -165,7 +165,7 @@ def test_build_wandb_run_name_uses_model_dataset_and_core_hparams():
 
     run_name = build_wandb_run_name(config)
 
-    assert run_name == "tiger-libri2mixmoduleremix-bs4-seg3.0-kaggle-t4x2"
+    assert run_name == "tiger-libri2mix-bs4-seg3-kaggle-t4x2"
 
 
 def test_reduce_on_plateau_uses_validation_metric_with_dataloader_suffix():

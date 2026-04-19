@@ -1,0 +1,80 @@
+# Kaggle T4x2 training config for TIGER-small on MiniLibriMix.
+# Expected workflow on Kaggle:
+# 1. Raw MiniLibriMix dataset is mounted under /kaggle/input/<your-dataset-name>
+# 2. Run DataPreProcess/process_librimix.py to generate JSON indexes into /kaggle/working/DataPreProcess/MiniLibriMix
+# 3. Train with this config
+
+# Network config
+audionet:
+  audionet_name: TIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+
+# Loss config
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+# Training config
+training:
+  system: AudioLightningModule
+  gpus: [0, 1]
+  parallel: ddp
+  epochs: 150
+  early_stop:
+    # Lightning 训练期只使用验证集，因此 monitor 直接使用 val/loss
+    monitor: val/loss
+    mode: min
+    patience: 20
+    verbose: true
+  SpeedAug: false
+
+# Optim config
+optimizer:
+  optim_name: adam
+  lr: 0.001
+  weight_decay: 0
+
+# Scheduler config
+scheduler:
+  sche_name: ReduceLROnPlateau
+  sche_config:
+    patience: 10
+    factor: 0.5
+
+# Data config
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    # Generated JSON index directories on Kaggle.
+    # If you choose a different output directory during preprocessing, update these three paths.
+    train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
+    valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
+    test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 3.0
+    normalize_audio: false
+    batch_size: 4
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: false
+
+exp:
+  exp_name: TIGER-Small-MiniLibriMix-Kaggle-T4x2

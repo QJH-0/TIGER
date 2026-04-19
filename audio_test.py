@@ -19,7 +19,7 @@ import look2hear.models
 import look2hear.datas
 from look2hear.metrics import MetricsTracker
 from look2hear.utils import tensors_to_device, RichProgressBarTheme, MyMetricsTextColumn, BatchesProcessedColumn
-from audio_train import build_wandb_project_name
+from audio_train import build_wandb_project_name, sanitize_exp_name_for_path
 
 from rich.progress import (
     BarColumn,
@@ -148,7 +148,12 @@ def main(config):
     # 修改：兼容无 main_args 的配置，自动补齐并计算 exp_dir。
     main_args = train_conf.setdefault("main_args", {})
     exp_name = train_conf["exp"]["exp_name"]
-    exp_dir = os.path.join(os.getcwd(), "Experiments", "checkpoint", exp_name)
+    exp_dir = os.path.join(
+        os.getcwd(),
+        "Experiments",
+        "checkpoint",
+        sanitize_exp_name_for_path(exp_name),
+    )
     main_args["exp_dir"] = exp_dir
     # 测试/实际分离不加载 .ckpt，而是加载 best_model.pth 或显式指定的预训练模型。
     model_source = resolve_eval_model_source(config, exp_dir)

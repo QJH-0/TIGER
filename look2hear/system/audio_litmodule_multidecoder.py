@@ -68,6 +68,14 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
             return self.default_monitor
         return monitor
 
+    def _epoch_display_1based(self) -> float:
+        """与自定义 Rich 进度条一致：第 1..max_epochs 轮（Lightning 内部仍为接力计数）。"""
+        tr = self._trainer
+        ce = self.current_epoch
+        if tr is None or tr.max_epochs is None:
+            return float(ce + 1)
+        return float(min(ce + 1, tr.max_epochs))
+
     def forward(self, wav, mouth=None):
         """Applies forward pass of the model.
 
@@ -154,10 +162,10 @@ class AudioLightningModuleMultiDecoder(pl.LightningModule):
         val_loss = torch.mean(self.all_gather(avg_loss))
         self.log(
             "epoch",
-            float(self.current_epoch),
+            self._epoch_display_1based(),
             on_step=False,
             on_epoch=True,
-            prog_bar=False,
+            prog_bar=True,
             sync_dist=True,
             logger=True,
         )

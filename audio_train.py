@@ -30,6 +30,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import wandb
+
 #手动登录
 wandb.login()
 
@@ -111,6 +112,26 @@ def _slugify_wandb_name(value):
     return "".join(ch.lower() for ch in text if ch.isalnum() or ch in "-.")
 
 
+def _compact_data_name_for_wandb(data_name):
+    text = str(data_name).strip()
+    for suffix in ("ModuleRemix", "DataModule", "Module"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+    return text or str(data_name)
+
+
+def _format_segment_for_wandb(segment):
+    if segment == "na":
+        return segment
+    try:
+        f = float(segment)
+    except (TypeError, ValueError):
+        return str(segment)
+    if f == int(f):
+        return str(int(f))
+    return str(f)
+
+
 def build_wandb_project_name(config):
     return "tiger-speech-separation"
 
@@ -126,9 +147,9 @@ def build_wandb_run_name(config):
 
     parts = [
         _slugify_wandb_name(audionet_name),
-        _slugify_wandb_name(data_name),
+        _slugify_wandb_name(_compact_data_name_for_wandb(data_name)),
         f"bs{batch_size}",
-        f"seg{segment}",
+        f"seg{_format_segment_for_wandb(segment)}",
     ]
     if exp_name:
         parts.append(_slugify_wandb_name(exp_name))
@@ -169,17 +190,48 @@ def configure_wandb_epoch_metrics(wandb_logger):
     experiment.define_metric("val/si_snr", step_metric="epoch")
 
 
+def sanitize_exp_name_for_path(exp_name) -> str:
+    """将 yaml 中的 exp_name 转为安全的目录名，避免不同实验写到同一路径或非法路径。"""
+    if exp_name is None:
+        return "unnamed-exp"
+    s = str(exp_name).strip()
+    if not s:
+        return "unnamed-exp"
+    for ch in '<>:"/\\|?*':
+        s = s.replace(ch, "_")
+    s = s.rstrip(". ")
+    return s or "unnamed-exp"
+
+
+def lightning_checkpoint_dir(exp_dir: str) -> str:
+    """Lightning ModelCheckpoint 写入目录：与 conf / best_model.pth 隔离，减少误加载。"""
+    return os.path.join(exp_dir, "checkpoints")
+
+
 def build_checkpoint_callback(checkpoint_dir):
     # 训练中只保留两个 checkpoint：last.ckpt（续训）和最优 best（验证集最小 val/loss）。
+    # enable_version_counter=False：续训/重复保存时覆盖同名文件，避免 best-vN.ckpt、last-vN.ckpt 堆积。
     return ModelCheckpoint(
-        checkpoint_dir,
+        dirpath=checkpoint_dir,
         filename="best",
         monitor="val/loss",
         mode="min",
         save_top_k=1,
         verbose=True,
         save_last=True,
+        enable_version_counter=False,
     )
+
+
+def _resolve_default_last_ckpt_path(exp_dir):
+    """优先新目录 checkpoints/last.ckpt，兼容旧版直接写在实验根目录下的 last.ckpt。"""
+    preferred = os.path.join(lightning_checkpoint_dir(exp_dir), "last.ckpt")
+    legacy = os.path.join(exp_dir, "last.ckpt")
+    if os.path.exists(preferred):
+        return preferred
+    if os.path.exists(legacy):
+        return legacy
+    return preferred
 
 
 def resolve_resume_checkpoint_path(config, exp_dir):
@@ -192,12 +244,12 @@ def resolve_resume_checkpoint_path(config, exp_dir):
     if isinstance(resume_setting, str):
         # 支持显式写 "last" 或直接给某个 .ckpt 的绝对/相对路径。
         if resume_setting.lower() == "last":
-            return os.path.join(exp_dir, "last.ckpt")
+            return _resolve_default_last_ckpt_path(exp_dir)
         return resume_setting
 
     if resume_setting is True:
         # 简写为 true 时，默认恢复当前实验目录下的 last.ckpt。
-        return os.path.join(exp_dir, "last.ckpt")
+        return _resolve_default_last_ckpt_path(exp_dir)
 
     return None
 
@@ -214,44 +266,71 @@ def resolve_cli_resume_override(plain_args):
     return None
 
 
+def _checkpoint_int_scalar(value):
+    if value is None:
+        return None
+    return int(value.item()) if hasattr(value, "item") else int(value)
+
+
 def extract_resume_progress(checkpoint):
-    epoch = checkpoint.get("epoch")
+    """解析 Lightning checkpoint 中的进度（与 PyTorch Lightning 写入语义一致）。"""
+    epoch_raw = checkpoint.get("epoch")
     global_step = checkpoint.get("global_step")
 
-    if epoch is None:
+    if epoch_raw is None:
         return None
 
-    completed_epochs = int(epoch) + 1
+    lightning_completed = _checkpoint_int_scalar(epoch_raw)
     progress = {
-        "completed_epochs": completed_epochs,
-        "next_epoch": completed_epochs + 1,
-        "global_step": int(global_step) if global_step is not None else None,
+        # 与 trainer.current_epoch / checkpoint['epoch'] 一致：已完整跑完的训练 epoch 个数
+        "lightning_completed_epochs": lightning_completed,
+        # 人类习惯的「下一轮」序号（从 1 开始计数）
+        "human_next_epoch": lightning_completed + 1,
+        "global_step": _checkpoint_int_scalar(global_step),
     }
     return progress
 
 
-def build_resume_summary_message(resume_ckpt_path, checkpoint):
+def build_resume_summary_message(resume_ckpt_path, checkpoint, max_epochs=None):
     if not resume_ckpt_path:
         return None
 
     progress = extract_resume_progress(checkpoint)
     if progress is None:
-        return f"Resuming from checkpoint {resume_ckpt_path}: epoch metadata unavailable"
+        return f"【断点接力】{resume_ckpt_path}：检查点中缺少 epoch 元数据。"
+
+    lc = progress["lightning_completed_epochs"]
+    hn = progress["human_next_epoch"]
+    gs = progress["global_step"]
+    gs_txt = f"{gs}" if gs is not None else "?"
+
+    if max_epochs is not None:
+        if hn > max_epochs:
+            return (
+                f"【断点接力】{resume_ckpt_path}\n"
+                f"  检查点 epoch 计数={lc}，已超过训练计划 {max_epochs} 轮；本次 fit 可能立即结束。"
+                f" global_step={gs_txt}"
+            )
+        return (
+            f"【断点接力】{resume_ckpt_path}\n"
+            f"  检查点内 Lightning epoch={lc}（已完整结束 {lc} 个训练 epoch）；"
+            f"续训进度条将从 Epoch {hn}/{max_epochs} 起接力至 {max_epochs}/{max_epochs}。"
+            f" global_step={gs_txt}"
+        )
 
     return (
-        f"Resuming from checkpoint {resume_ckpt_path}: "
-        f"completed_epochs={progress['completed_epochs']}, "
-        f"next_epoch={progress['next_epoch']}, "
-        f"global_step={progress['global_step']}"
+        f"【断点接力】{resume_ckpt_path}：checkpoint epoch={lc}，下一显示轮次={hn}，global_step={gs_txt}"
     )
 
 
-def log_resume_checkpoint_status(resume_ckpt_path):
+def log_resume_checkpoint_status(resume_ckpt_path, max_epochs=None):
     if not resume_ckpt_path:
         return
 
     checkpoint = torch.load(resume_ckpt_path, map_location="cpu")
-    message = build_resume_summary_message(resume_ckpt_path, checkpoint)
+    message = build_resume_summary_message(
+        resume_ckpt_path, checkpoint, max_epochs=max_epochs
+    )
     if message:
         print_only(message)
 
@@ -265,13 +344,16 @@ def resolve_export_checkpoint_path(checkpoint_callback, exp_dir):
     if last_model_path and os.path.exists(last_model_path):
         return last_model_path
 
-    fallback_last = os.path.join(exp_dir, "last.ckpt")
-    if os.path.exists(fallback_last):
-        return fallback_last
+    preferred_last = os.path.join(lightning_checkpoint_dir(exp_dir), "last.ckpt")
+    legacy_last = os.path.join(exp_dir, "last.ckpt")
+    if os.path.exists(preferred_last):
+        return preferred_last
+    if os.path.exists(legacy_last):
+        return legacy_last
 
     raise FileNotFoundError(
         "No checkpoint available for exporting best_model.pth. "
-        "Neither best_model_path nor last.ckpt exists."
+        "Neither best_model_path nor checkpoints/last.ckpt (nor legacy last.ckpt) exists."
     )
 
 def main(config):
@@ -333,11 +415,14 @@ def main(config):
 
     # Just after instantiating, save the args. Easy loading in the future.
     # 将当前配置落盘到实验目录，便于复现实验与定位参数来源。
+    # 实验根目录名由 exp_name 派生（清洗非法字符），与 yaml 中 exp_name 一一对应，避免多配置写到同一路径。
+    exp_folder = sanitize_exp_name_for_path(config["exp"]["exp_name"])
     config["main_args"]["exp_dir"] = os.path.join(
-        os.getcwd(), "Experiments", "checkpoint", config["exp"]["exp_name"]
+        os.getcwd(), "Experiments", "checkpoint", exp_folder
     )
     exp_dir = config["main_args"]["exp_dir"]
     os.makedirs(exp_dir, exist_ok=True)
+    os.makedirs(lightning_checkpoint_dir(exp_dir), exist_ok=True)
     conf_path = os.path.join(exp_dir, "conf.yml")
     with open(conf_path, "w") as outfile:
         yaml.safe_dump(config, outfile)
@@ -375,7 +460,7 @@ def main(config):
     # Define callbacks
     print_only("Instantiating ModelCheckpoint")
     callbacks = []
-    checkpoint_dir = os.path.join(exp_dir)
+    checkpoint_dir = lightning_checkpoint_dir(exp_dir)
     # 根据 val/loss_epoch 监控最优模型，并保留 top-k。
     checkpoint = build_checkpoint_callback(checkpoint_dir)
     callbacks.append(checkpoint)
@@ -394,11 +479,12 @@ def main(config):
 
     # default logger used by trainer
     logger_dir = os.path.join(os.getcwd(), "Experiments", "tensorboard_logs")
-    os.makedirs(os.path.join(logger_dir, config["exp"]["exp_name"]), exist_ok=True)
+    log_subdir = sanitize_exp_name_for_path(config["exp"]["exp_name"])
+    os.makedirs(os.path.join(logger_dir, log_subdir), exist_ok=True)
     # comet_logger = TensorBoardLogger(logger_dir, name=config["exp"]["exp_name"])
     comet_logger = WandbLogger(
             name=build_wandb_run_name(config), 
-            save_dir=os.path.join(logger_dir, config["exp"]["exp_name"]), 
+            save_dir=os.path.join(logger_dir, log_subdir), 
             project=build_wandb_project_name(config),
             config=sanitize_wandb_config(config),
             # offline=True
@@ -425,7 +511,13 @@ def main(config):
         # fast_dev_run=True,
     )
     resume_ckpt_path = resolve_resume_checkpoint_path(config, exp_dir)
-    log_resume_checkpoint_status(resume_ckpt_path)
+    planned_epochs = config["training"]["epochs"]
+    if resume_ckpt_path:
+        log_resume_checkpoint_status(resume_ckpt_path, max_epochs=planned_epochs)
+    else:
+        print_only(
+            f"【全新训练】进度条按 Epoch 1/{planned_epochs} … {planned_epochs}/{planned_epochs} 显示（共 {planned_epochs} 轮）。"
+        )
     # 恢复训练时把 ckpt_path 交给 Trainer；非恢复场景传 None 即可。
     trainer.fit(system, ckpt_path=resume_ckpt_path)
     print_only("Finished Training")
