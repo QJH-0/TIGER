@@ -418,7 +418,7 @@ def main(config):
     # 实验根目录名由 exp_name 派生（清洗非法字符），与 yaml 中 exp_name 一一对应，避免多配置写到同一路径。
     exp_folder = sanitize_exp_name_for_path(config["exp"]["exp_name"])
     config["main_args"]["exp_dir"] = os.path.join(
-        os.getcwd(), "Experiments", "checkpoint", exp_folder
+        os.getcwd(), "Experiments", exp_folder
     )
     exp_dir = config["main_args"]["exp_dir"]
     os.makedirs(exp_dir, exist_ok=True)

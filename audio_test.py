@@ -151,7 +151,6 @@ def main(config):
     exp_dir = os.path.join(
         os.getcwd(),
         "Experiments",
-        "checkpoint",
         sanitize_exp_name_for_path(exp_name),
     )
     main_args["exp_dir"] = exp_dir
