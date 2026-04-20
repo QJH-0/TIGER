@@ -10,7 +10,6 @@ Experiments/**/checkpoint/**/conf.yml
 # Local debug files
 tea_debug.log
 /.cursor/
-/Experiments/
 /docs/
 /test/
 /wandb/
