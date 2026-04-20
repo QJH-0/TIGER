@@ -501,11 +501,13 @@ def main(config):
         devices=gpus,
         accelerator=distributed_backend,
         strategy=DDPStrategy(find_unused_parameters=True) if use_ddp else "auto",
+        accumulate_grad_batches=config["training"].get("accumulate_grad_batches", 1),
         limit_train_batches=1.0,  # Useful for fast experiment
         gradient_clip_val=5.0,
         logger=comet_logger,
         sync_batchnorm=True,
-        precision="16-mixed",
+        # 训练精度：用配置 training.precision 控制（默认 16-mixed 省显存），避免依赖 Lightning CLI 透传参数格式。
+        precision=config["training"].get("precision", "16-mixed"),
         # num_sanity_val_steps=0,
         # sync_batchnorm=True,
         # fast_dev_run=True,

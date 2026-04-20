@@ -65,6 +65,17 @@ def make_optimizer(params, optim_name="adam", **kwargs):
         >>> optimizer = make_optimizer(model.parameters(), optimizer='sgd',
         >>>                            lr=1e-3)
     """
+    # YAML/CLI 解析过程中，科学计数法（如 "1e-5"）有时会落成字符串，
+    # 进而触发 torch.optim 里对数值比较/运算的 TypeError。
+    # 这里做一次轻量的兼容转换：仅对常见的标量超参把“数字字符串”转为 float。
+    for key in ("lr", "weight_decay", "eps", "momentum", "alpha"):
+        value = kwargs.get(key)
+        if isinstance(value, str):
+            try:
+                kwargs[key] = float(value)
+            except ValueError:
+                pass
+
     return get(optim_name)(params, **kwargs)
 
 

@@ -36,26 +36,31 @@ training:
   system: AudioLightningModule
   gpus: [0, 1]
   parallel: ddp
-  epochs: 150
+  epochs: 300  # 训练轮数：配合 early_stop 使用；如果收敛慢/想跑满可再增大
+  # 梯度累积：在 OOM 需要降低 batch_size 时，用它来近似保持有效 batch。
+  # effective_bs ≈ datamodule.data_config.batch_size * accumulate_grad_batches
+  accumulate_grad_batches: 4
+  # Lightning Trainer precision：推荐 16-mixed（省显存且通常更稳）；显存很富裕也可改 32-true
+  precision: 16-mixed
   early_stop:
     # Lightning 训练期只使用验证集，因此 monitor 直接使用 val/loss
     monitor: val/loss
     mode: min
     patience: 20
     verbose: true
-  SpeedAug: false
+  SpeedAug: true  # 速度扰动数据增强（在 System 的 training_step 内生效）；不稳定时可关掉对比
 
 # Optim config
 optimizer:
   optim_name: adam
-  lr: 0.001
-  weight_decay: 0
+  lr: 1.0e-4          # 学习率：batch_size 变小/累积变大时通常需要更保守
+  weight_decay: 1.0e-5  # L2 正则：有助于泛化；过大可能导致欠拟合
 
 # Scheduler config
 scheduler:
   sche_name: ReduceLROnPlateau
   sche_config:
-    patience: 10
+    patience: 15  # plateau 容忍：太小会频繁降 lr；太大可能降得太晚
     factor: 0.5
 
 # Data config
@@ -69,12 +74,12 @@ datamodule:
     test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
     n_src: 2
     sample_rate: 16000
-    segment: 3.0
-    normalize_audio: false
-    batch_size: 4
+    segment: 4.0          # 片段长度（秒）：越长越吃显存/但训练更充分；OOM 就降到 3.0/2.0
+    normalize_audio: true # 是否归一化：通常更稳；如发现响度信息有用可再评估
+    batch_size: 1         # 每卡 batch：OOM 优先降它，再用 accumulate_grad_batches 补有效 batch
     num_workers: 4
     pin_memory: true
-    persistent_workers: false
+    persistent_workers: true  # DataLoader 常驻 worker：加速但更占资源；若卡住/报错可关
 
 exp:
   exp_name: TIGER-Large-MiniLibriMix-Kaggle-T4x2
