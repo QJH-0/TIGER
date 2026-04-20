@@ -2,11 +2,6 @@
 *.pyc
 *.log
 
-# Experiment artifacts
-Experiments/**/wandb/
-Experiments/**/tensorboard_logs/
-Experiments/**/checkpoint/**/conf.yml
-
 # Local debug files
 tea_debug.log
 /.cursor/
