@@ -40,11 +40,12 @@ loss:
 main_args:
   batch_size: 1
   conf_dir: configs/tiger-small-kaggle-t4x2.yml
-  epoch: 150
-  exp_dir: /kaggle/working/TIGER/Experiments/checkpoint/TIGER-Small-MiniLibriMix-Kaggle-T4x2
+  epoch: 250
+  exp_dir: /kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2
   help: null
-  resume: false
+  resume: true
   resume_ckpt: null
+  resume_from_checkpoint: true
   segment: null
 optimizer:
   lr: 0.001
@@ -63,7 +64,7 @@ training:
     monitor: val/loss
     patience: 20
     verbose: true
-  epochs: 150
+  epochs: 250
   gpus:
   - 0
   - 1
