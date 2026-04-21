@@ -16,6 +16,8 @@ from .cnnlayers import (
 from .rnnlayers import DPRNN, DPRNNBlock, DPRNNLinear, LSTMBlockTF, TransformerBlockTF
 from .enc_dec import make_enc_dec, FreeFB
 from .normalizations import gLN, cLN, LN, bN
+from .binary_layers import BinaryBlock, BinaryConv1d, BinaryLinear, RPReLU, RSign
+from .dispatch_layers import DISPATCHLoss
 from .stft import forward_stft, inverse_stft
 from .stft_tfgn import Stft
 
@@ -44,6 +46,12 @@ __all__ = [
     "cLN",
     "LN",
     "bN",
+    "RSign",
+    "RPReLU",
+    "BinaryConv1d",
+    "BinaryLinear",
+    "BinaryBlock",
+    "DISPATCHLoss",
     "forward_stft",
     "inverse_stft",
     "Stft",

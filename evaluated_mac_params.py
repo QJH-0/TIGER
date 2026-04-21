@@ -1,53 +1,98 @@
-import os
 import argparse
-import json
-import time
+
 import torch
-import torch.nn as nn
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
-from look2hear.utils.parser_utils import prepare_parser_from_dict, parse_args_as_dict
-import look2hear.models
 import yaml
-from ptflops import get_model_complexity_info
-from rich import print
+from torch.profiler import ProfilerActivity, profile
 
-def check_parameters(net):
-    """
-        Returns module parameters. Mb
-    """
-    parameters = sum(param.numel() for param in net.parameters())
-    return parameters / 10 ** 6
+import look2hear.models
+from look2hear.layers.binary_layers import BinaryConv1d, BinaryLinear
+
+try:
+    from ptflops import get_model_complexity_info
+except ImportError:  # pragma: no cover - optional dependency
+    get_model_complexity_info = None
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--exp_dir", default="exp/tmp", help="Full path to save best validation model"
-)
+def build_model(config_path: str):
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
 
-with open("configs/tiger.yml") as f:
-    def_conf = yaml.safe_load(f)
-parser = prepare_parser_from_dict(def_conf, parser=parser)
-
-arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)
-audiomodel = getattr(look2hear.models, arg_dic["audionet"]["audionet_name"])(
-    sample_rate=arg_dic["datamodule"]["data_config"]["sample_rate"],
-    **arg_dic["audionet"]["audionet_config"]
-)
-# 配置GPU为mps
-device = torch.device("mps")
-a = torch.randn(1, 1, 16000).to(device)
-total_macs = 0
-total_params = 0
-model = audiomodel.to(device)
-with torch.no_grad():
-    macs, params = get_model_complexity_info(
-        model, (16000,), as_strings=False, print_per_layer_stat=True, verbose=False
+    model = getattr(look2hear.models, config["audionet"]["audionet_name"])(
+        sample_rate=config["datamodule"]["data_config"]["sample_rate"],
+        **config["audionet"]["audionet_config"],
     )
-print(model(a).shape)
-total_macs += macs
-total_params += params
-print("MACs: ", total_macs / 10.0 ** 9)
-print("Params: ", total_params / 10.0 ** 6)
+    return model, config
+
+
+def count_binary_ops(model: torch.nn.Module) -> int:
+    total = 0
+    for module in model.modules():
+        if isinstance(module, BinaryConv1d):
+            kernel = module.kernel_size[0]
+            total += (
+                module.out_channels
+                * (module.in_channels // module.groups)
+                * kernel
+            )
+        elif isinstance(module, BinaryLinear):
+            total += module.in_features * module.out_features
+    return total
+
+
+def summarize_efficiency(model: torch.nn.Module, input_length: int) -> dict[str, float]:
+    params = sum(parameter.numel() for parameter in model.parameters())
+    fp32_flops = estimate_flops(model, input_length)
+    binary_bops = count_binary_ops(model)
+    equivalent_flops = fp32_flops - binary_bops + binary_bops / 64.0
+    model_size_mb = params * 4 / (1024**2)
+    return {
+        "fp32_flops": float(fp32_flops),
+        "binary_bops": float(binary_bops),
+        "equivalent_flops": float(equivalent_flops),
+        "params": float(params),
+        "model_size_mb": float(model_size_mb),
+    }
+
+
+def estimate_flops(model: torch.nn.Module, input_length: int) -> float:
+    if get_model_complexity_info is not None:
+        flops, _ = get_model_complexity_info(
+            model,
+            (input_length,),
+            as_strings=False,
+            print_per_layer_stat=False,
+            verbose=False,
+        )
+        return float(flops)
+
+    example = torch.randn(1, input_length)
+    model = model.cpu().eval()
+    with profile(activities=[ProfilerActivity.CPU], with_flops=True) as profiler:
+        with torch.no_grad():
+            model(example)
+    return float(sum(event.flops for event in profiler.key_averages()))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        default="configs/tiger-small-kaggle-t4x2.yml",
+        help="YAML config path used to instantiate the model.",
+    )
+    parser.add_argument(
+        "--input-length",
+        type=int,
+        default=16000,
+        help="Input waveform length for FLOPs estimation.",
+    )
+    args = parser.parse_args()
+
+    model, _ = build_model(args.config)
+    stats = summarize_efficiency(model, args.input_length)
+    for key, value in stats.items():
+        print(f"{key}: {value}")
+
+
+if __name__ == "__main__":
+    main()

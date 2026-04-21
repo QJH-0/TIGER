@@ -11,6 +11,7 @@ import look2hear.losses
 import look2hear.metrics
 import look2hear.utils
 from look2hear.system import make_optimizer
+from look2hear.models.teacher_tiger import load_teacher_tiger
 from dataclasses import dataclass
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -356,6 +357,34 @@ def resolve_export_checkpoint_path(checkpoint_callback, exp_dir):
         "Neither best_model_path nor checkpoints/last.ckpt (nor legacy last.ckpt) exists."
     )
 
+
+def extract_model_state_dict(checkpoint_payload):
+    if not isinstance(checkpoint_payload, dict):
+        raise TypeError("Unsupported checkpoint payload type.")
+
+    if "state_dict" in checkpoint_payload:
+        state_dict = checkpoint_payload["state_dict"]
+    else:
+        state_dict = checkpoint_payload
+
+    if any(key.startswith("audio_model.") for key in state_dict.keys()):
+        return {
+            key[len("audio_model.") :]: value
+            for key, value in state_dict.items()
+            if key.startswith("audio_model.")
+        }
+    return state_dict
+
+
+def load_model_checkpoint(model, checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = extract_model_state_dict(checkpoint)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    return {
+        "missing_keys": missing,
+        "unexpected_keys": unexpected,
+    }
+
 def main(config):
     """
     使用 PyTorch Lightning 进行训练。
@@ -390,6 +419,11 @@ def main(config):
         sample_rate=config["datamodule"]["data_config"]["sample_rate"],
         **config["audionet"]["audionet_config"],
     )
+    distill_config = config.get("distillation", {})
+    student_init_ckpt = distill_config.get("student_init_ckpt")
+    if student_init_ckpt:
+        print_only(f"Loading student init checkpoint <{student_init_ckpt}>")
+        load_model_checkpoint(model, student_init_ckpt)
     # import pdb; pdb.set_trace()
     print_only("Instantiating Optimizer <{}>".format(config["optimizer"]["optim_name"]))
     optimizer = make_optimizer(model.parameters(), **config["optimizer"])
@@ -456,6 +490,18 @@ def main(config):
         scheduler=scheduler,
         config=config,
     )
+    if config["training"]["system"] == "DistillAudioLightningModule":
+        teacher_ckpt = distill_config.get("teacher_ckpt")
+        if not teacher_ckpt:
+            raise ValueError("DistillAudioLightningModule requires distillation.teacher_ckpt")
+        teacher_model_kwargs = dict(config["audionet"]["audionet_config"])
+        teacher_model_kwargs.pop("binary_config", None)
+        print_only(f"Loading teacher checkpoint <{teacher_ckpt}>")
+        system.teacher_model = load_teacher_tiger(
+            checkpoint_path=teacher_ckpt,
+            model_kwargs=teacher_model_kwargs,
+            sample_rate=config["datamodule"]["data_config"]["sample_rate"],
+        )
 
     # Define callbacks
     print_only("Instantiating ModelCheckpoint")

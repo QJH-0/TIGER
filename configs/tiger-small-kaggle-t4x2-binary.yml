@@ -1,0 +1,85 @@
+# Kaggle T4x2 binary training config for TIGER-small on MiniLibriMix.
+
+audionet:
+  audionet_name: BinaryTIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+    binary_config:
+      protect_first_layer: true
+      protect_attention: true
+      protect_1x1_conv: false
+      protect_output_layer: true
+      enable_binary_linear: false
+      protect_patterns:
+        - bandsplit.proj
+        - q_proj
+        - k_proj
+        - v_proj
+        - mask_gen
+        - istft
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: BinaryAudioLightningModule
+  gpus: [0, 1]
+  parallel: ddp
+  epochs: 300
+  accumulate_grad_batches: 4
+  precision: 16-mixed
+  binary_stage_epochs:
+    activation_warmup: 20
+    weight_binarize: 280
+  early_stop:
+    monitor: val/loss
+    mode: min
+    patience: 20
+    verbose: true
+  SpeedAug: true
+
+optimizer:
+  optim_name: adam
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+
+scheduler:
+  sche_name: ReduceLROnPlateau
+  sche_config:
+    patience: 15
+    factor: 0.5
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
+    valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
+    test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 4.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+
+exp:
+  exp_name: TIGER-Small-Binary-Kaggle-T4x2

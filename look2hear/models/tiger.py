@@ -7,8 +7,15 @@ import math
 from .base_model import BaseModel
 from ..layers import activations, normalizations
 
+_PAPER_URL = "https://arxiv.org/abs/2410.01469"
+
 
 def GlobLN(nOut):
+    """
+    论文对照（`TIGER` 归一化策略）：使用全局层归一化（Global LayerNorm）。
+
+    这里用 `GroupNorm(1, C)` 等价实现，常用于语音分离网络的通道归一化。
+    """
     return nn.GroupNorm(1, nOut, eps=1e-8)
 
 
@@ -16,6 +23,8 @@ class ConvNormAct(nn.Module):
     """
     This class defines the convolution layer with normalization and a PReLU
     activation
+
+    论文对照：作为 TIGER 各子模块中的基础卷积单元（Conv + Norm + Act）。
     """
 
     def __init__(self, nIn, nOut, kSize, stride=1, groups=1):
@@ -42,6 +51,8 @@ class ConvNormAct(nn.Module):
 class ConvNorm(nn.Module):
     """
     This class defines the convolution layer with normalization and PReLU activation
+
+    论文对照：作为 TIGER 内部的基础“卷积+归一化”单元（不含显式激活）。
     """
 
     def __init__(self, nIn, nOut, kSize, stride=1, groups=1, bias=True):
@@ -63,6 +74,11 @@ class ConvNorm(nn.Module):
         return self.norm(output)
 
 class ATTConvActNorm(nn.Module):
+    """
+    论文对照（注意力模块内的投影层）：用于生成 Q/K/V 或做 concat 投影的 1x1 Conv + Act + Norm。
+
+    - 当 `is2d=True` 时用于 (T,F) 特征上的 2D 卷积投影（对应论文的时频上下文建模实现）。
+    """
     def __init__(
         self,
         in_chan: int = 1,
@@ -140,6 +156,8 @@ class ATTConvActNorm(nn.Module):
 class DilatedConvNorm(nn.Module):
     """
     This class defines the dilated convolution with normalized output.
+
+    论文对照：多尺度上下文提取时的“下采样/扩感受野”卷积单元（常与 depthwise/组卷积一起用）。
     """
 
     def __init__(self, nIn, nOut, kSize, stride=1, d=1, groups=1):
@@ -169,6 +187,11 @@ class DilatedConvNorm(nn.Module):
 
 
 class Mlp(nn.Module):
+    """
+    论文对照（轻量全局建模/通道混合）：在 `UConvBlock` 内对聚合后的全局特征做非线性变换。
+
+    实现上是 1x1 Conv → depthwise Conv → ReLU → 1x1 Conv（带 Dropout）。
+    """
     def __init__(self, in_features, hidden_size, drop=0.1):
         super().__init__()
         self.fc1 = ConvNorm(in_features, hidden_size, 1, bias=False)
@@ -189,6 +212,14 @@ class Mlp(nn.Module):
         return x
 
 class InjectionMultiSum(nn.Module):
+    # Paper mapping: this module is the closest implementation of the
+    # selective injection / local-global fusion step inside MAS.
+    """
+    论文对照（局部-全局融合 / selective injection）：将全局特征以门控方式注入局部特征。
+
+    - `sigmoid(global_act)` 作为门控，控制局部特征的保留比例
+    - 同时加上对齐到同一时间长度的全局特征残差
+    """
     def __init__(self, inp: int, oup: int, kernel: int = 1) -> None:
         super().__init__()
         groups = 1
@@ -218,6 +249,11 @@ class InjectionMultiSum(nn.Module):
         return out
 
 class InjectionMulti(nn.Module):
+    """
+    论文对照（局部-全局融合的乘法版本）：仅做局部特征 * 门控，不额外加全局残差。
+
+    在本文件中主要作为可选融合形式，核心使用场景仍在多尺度模块的融合阶段。
+    """
     def __init__(self, inp: int, oup: int, kernel: int = 1) -> None:
         super().__init__()
         groups = 1
@@ -243,10 +279,21 @@ class InjectionMulti(nn.Module):
         return out
 
 class UConvBlock(nn.Module):
+    # Paper mapping: treat this block as the code-side carrier of MAS.
+    # `spp_dw`, `globalatt`, `loc_glo_fus`, and `last_layer` together realize
+    # the paper's multi-scale aggregation / selective attention idea.
     """
     This class defines the block which performs successive downsampling and
     upsampling in order to be able to analyze the input features in multiple
     resolutions.
+    """
+    """
+    论文对照：多尺度选择性注意力/上下文提取（multi-scale selective attention / multi-scale context）。
+
+    关键对应：
+    - `spp_dw`：多尺度下采样路径（逐层 stride=2）提取不同尺度上下文
+    - `globalatt`：聚合多尺度后做轻量全局建模（对应论文“选择性/注意力式”的上下文增强思想）
+    - `loc_glo_fus` / `last_layer`：局部-全局融合并逐层上采样回原分辨率
     """
 
     def __init__(self, out_channels=128, in_channels=512, upsampling_depth=4, model_T=True):
@@ -325,6 +372,15 @@ class UConvBlock(nn.Module):
         return self.res_conv(expanded) + residual
 
 class MultiHeadSelfAttention2D(nn.Module):
+    # Paper mapping: this class is the code counterpart of FFI.
+    """
+    论文对照：全频帧注意力（full-frequency-frame attention）。
+
+    实现要点：
+    - 对 (T,F) 特征做 1x1 Conv 生成 Q/K/V
+    - 将 (E,F) 展开到 embedding 维度后做 self-attention（对时间维做注意力）
+    - concat 多头输出后再投影 + 残差
+    """
     def __init__(
         self,
         in_chan: int,
@@ -398,6 +454,11 @@ class MultiHeadSelfAttention2D(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
+        """
+        输入/输出：`x` 为 4D 特征图（通常形状约为 [B, C, T, F] 或转置后等价形状）。
+
+        论文对照：用于在某一条路径上补充长程依赖建模能力（对应论文的 full-frequency-frame attention）。
+        """
         if self.dim == 4:
             x = x.transpose(-2, -1).contiguous()
 
@@ -441,6 +502,16 @@ class MultiHeadSelfAttention2D(nn.Module):
     
 
 class Recurrent(nn.Module):
+    # Paper mapping: this is the main time-frequency interleaved backbone.
+    # `freq_path` models cross-band interaction, `frame_path` models temporal
+    # interaction, and each path is built from MAS + FFI + normalization.
+    """
+    论文对照：时频交错（Time-frequency Interleaved）特征更新模块。
+
+    - 输入特征按子带堆叠：形状约为 [B, nband, N, T]
+    - 交替执行：Frequency path（跨子带）与 Frame path（跨时间）
+    - `iter` 次迭代实现循环细化（论文里的 interleaved gain extraction / reconstruction 的工程化形式）
+    """
     def __init__(
         self, 
         out_channels=128, 
@@ -456,13 +527,16 @@ class Recurrent(nn.Module):
         super().__init__()
         self.nband = nband
 
+        # 论文对照：两条路径结构保持一致，便于交替更新时保持计算图对称与实现简洁。
         self.freq_path = nn.ModuleList([
+            # Paper mapping: frequency path = MAS + FFI + norm.
             UConvBlock(out_channels, in_channels, upsampling_depth),
             MultiHeadSelfAttention2D(out_channels, 1, n_head=n_head, hid_chan=att_hid_chan, act_type="prelu", norm_type="LayerNormalization4D", dim=4),
             normalizations.get("LayerNormalization4D")((out_channels, 1))
         ])
         
         self.frame_path = nn.ModuleList([
+            # Paper mapping: frame path = MAS + FFI + norm.
             UConvBlock(out_channels, in_channels, upsampling_depth),
             MultiHeadSelfAttention2D(out_channels, 1, n_head=n_head, hid_chan=att_hid_chan, act_type="prelu", norm_type="LayerNormalization4D", dim=4),
             normalizations.get("LayerNormalization4D")((out_channels, 1))
@@ -474,10 +548,18 @@ class Recurrent(nn.Module):
         )
 
     def forward(self, x):
+        """
+        参数：
+        - `x`：子带特征 [B, nband, N, T]
+
+        返回：
+        - 更新后的子带特征 [B, nband, N, T]
+        """
         # B, nband, N, T
         B, nband, N, T = x.shape
         x = x.permute(0, 2, 1, 3).contiguous() # B, N, nband, T
         mixture = x.clone()
+        # 论文对照：交错迭代（interleaved iterations），通过残差/融合实现逐步细化。
         for i in range(self.iter):
             if i == 0:
                 x = self.freq_time_process(x, B, nband, N, T) # B, N, nband, T
@@ -487,9 +569,16 @@ class Recurrent(nn.Module):
         return x.permute(0, 2, 1, 3).contiguous() # B, nband, N, T
     
     def freq_time_process(self, x, B, nband, N, T):
+        """
+        单次“频率路径 → 时间路径”的交错更新。
+
+        - Frequency path：对 nband 维建模（每个时间帧上的频带关系）
+        - Frame path：对 T 维建模（每个频带上的时间序列关系）
+        """
         # Process Frequency Path
         residual_1 = x.clone()
         x = x.permute(0, 3, 1, 2).contiguous() # B, T, N, nband
+        # 论文对照：Frequency path（跨子带/跨频带上下文）。
         freq_fea = self.freq_path[0](x.view(B*T, N, nband)) # B*T, N, nband
         freq_fea = freq_fea.view(B, T, N, nband).permute(0, 2, 1, 3).contiguous() # B, N, T, nband
         freq_fea = self.freq_path[1](freq_fea) # B, N, T, nband
@@ -499,6 +588,7 @@ class Recurrent(nn.Module):
         # Process Frame Path
         residual_2 = x.clone()
         x2 = x.permute(0, 2, 1, 3).contiguous()
+        # 论文对照：Frame path（跨时间帧上下文）。
         frame_fea = self.frame_path[0](x2.view(B*nband, N, T)) # B*nband, N, T
         frame_fea = frame_fea.view(B, nband, N, T).permute(0, 2, 1, 3).contiguous()
         frame_fea = self.frame_path[1](frame_fea) # B, N, nband, T
@@ -507,6 +597,23 @@ class Recurrent(nn.Module):
         return x
         
 class TIGER(BaseModel):
+    # Paper mapping summary:
+    # `band_width`: subband split
+    # `BN`: subband compression
+    # `separator`: time-frequency interleaved backbone
+    # `UConvBlock`: MAS
+    # `MultiHeadSelfAttention2D`: FFI
+    # `mask`: gain/mask head
+    # `istft`: waveform reconstruction
+    """
+    论文对照：TIGER（Time-frequency Interleaved Gain Extraction and Reconstruction）主模型。
+
+    关键实现路径：
+    - STFT → 子带划分（`band_width`）→ 子带压缩（`BN`）→ 时频交错分离器（`separator`）
+      → 子带复数掩码/增益（`mask`）→ 子带重建并拼回全频 → iSTFT
+
+    论文链接：`https://arxiv.org/abs/2410.01469`
+    """
     def __init__(
         self,
         out_channels=128,
@@ -533,6 +640,8 @@ class TIGER(BaseModel):
         self.num_output = num_sources
         self.eps = torch.finfo(torch.float32).eps
 
+        # 论文对照：频带划分（band split / prior knowledge band partition）。
+        # 这里把 [0, sr/2] 的离散频点划成非均匀子带：低频更细、高频更粗，用于降低频率维计算量。
         # 0-1k (25 hop), 1k-2k (100 hop), 2k-4k (250 hop), 4k-8k (500 hop)
         bandwidth_25 = int(np.floor(25 / (sample_rate / 2.) * self.enc_dim))
         bandwidth_100 = int(np.floor(100 / (sample_rate / 2.) * self.enc_dim))
@@ -544,19 +653,31 @@ class TIGER(BaseModel):
         self.band_width += [bandwidth_500]*8
         self.band_width.append(self.enc_dim - np.sum(self.band_width))
         self.nband = len(self.band_width)
+        # 调试输出：打印每个子带的频点数（训练时如不需要可注释掉）
         print(self.band_width)
         
         self.BN = nn.ModuleList([])
+        # Paper mapping: `BN[i]` is the subband compression block before the
+        # interleaved separator.
         for i in range(self.nband):
+            # 论文对照：频率压缩（frequency compression / bottleneck）。
+            # 将每个子带的 (real, imag) 拼接为 2*BW 通道，再压缩到固定通道数 `feature_dim`。
             self.BN.append(nn.Sequential(nn.GroupNorm(1, self.band_width[i]*2, self.eps),
                                          nn.Conv1d(self.band_width[i]*2, self.feature_dim, 1)
                                         )
                           )
 
+        # 论文对照：主干分离器（separator）= 时频交错更新模块（`Recurrent`）。
+        # Paper mapping: `separator` is the main TIGER backbone, alternating
+        # frequency-path and frame-path updates.
         self.separator = Recurrent(self.feature_dim, in_channels, self.nband, upsampling_depth, att_n_head, att_hid_chan, att_kernel_size, att_stride, num_blocks)       
         
         self.mask = nn.ModuleList([])
+        # Paper mapping: `mask[i]` is the per-subband gain/mask prediction head
+        # used before subband reconstruction.
         for i in range(self.nband):
+            # 论文对照：子带增益/掩码预测头（gain/mask head）。
+            # 这里按源数 `num_sources` 分组输出子带的复数掩码（real/imag 两路），并带门控项用于稳定训练。
             self.mask.append(nn.Sequential(
                                            nn.PReLU(),
                                            nn.Conv1d(self.feature_dim, self.band_width[i]*4*num_sources, 1, groups=num_sources)
@@ -580,6 +701,15 @@ class TIGER(BaseModel):
         return input, rest
         
     def forward(self, input):
+        """
+        论文对照：gain extraction & reconstruction 的端到端推理流程。
+
+        输入：
+        - `input`：时域波形 (B, C, T) / (B, T) / (T)
+
+        输出：
+        - `output`：分离后的波形 (B*C, num_sources, T)
+        """
         # input shape: (B, C, T)
         was_one_d = False
         if input.ndim == 1:
@@ -593,14 +723,14 @@ class TIGER(BaseModel):
         batch_size, nch, nsample = input.shape
         input = input.view(batch_size*nch, -1)
 
-        # frequency-domain separation
+        # 论文对照：分析变换（analysis transform），用 STFT 得到复数谱。
         spec = torch.stft(input, n_fft=self.win, hop_length=self.stride, 
                           window=torch.hann_window(self.win).to(input.device).type(input.type()),
                           return_complex=True)
 
         # print(spec.shape)
 
-        # concat real and imag, split to subbands
+        # 论文对照：复数谱拆分到子带（subband split）。
         spec_RI = torch.stack([spec.real, spec.imag], 1)  # B*nch, 2, F, T
         subband_spec_RI = []
         subband_spec = []
@@ -610,18 +740,19 @@ class TIGER(BaseModel):
             subband_spec.append(spec[:,band_idx:band_idx+self.band_width[i]])  # B*nch, BW, T
             band_idx += self.band_width[i]
 
-        # normalization and bottleneck
+        # 论文对照：子带归一化 + 压缩（normalization + bottleneck compression）。
         subband_feature = []
         for i in range(len(self.band_width)):
             subband_feature.append(self.BN[i](subband_spec_RI[i].view(batch_size*nch, self.band_width[i]*2, -1)))
         subband_feature = torch.stack(subband_feature, 1)  # B, nband, N, T
         # import pdb; pdb.set_trace()
-        # separator
+        # 论文对照：分离主干（separator）= 时频交错上下文建模。
         sep_output = self.separator(subband_feature.view(batch_size*nch, self.nband, self.feature_dim, -1))  # B, nband, N, T
         sep_output = sep_output.view(batch_size*nch, self.nband, self.feature_dim, -1)
         
         sep_subband_spec = []
         for i in range(self.nband):
+            # 论文对照：子带复数掩码/增益预测并施加（gain extraction & reconstruction on subband）。
             this_output = self.mask[i](sep_output[:,i]).view(batch_size*nch, 2, 2, self.num_output, self.band_width[i], -1)
             this_mask = this_output[:,0] * torch.sigmoid(this_output[:,1])  # B*nch, 2, K, BW, T
             this_mask_real = this_mask[:,0]  # B*nch, K, BW, T
@@ -636,6 +767,7 @@ class TIGER(BaseModel):
             sep_subband_spec.append(torch.complex(est_spec_real, est_spec_imag))
         sep_subband_spec = torch.cat(sep_subband_spec, 2)
         
+        # 论文对照：合成变换（synthesis transform / waveform reconstruction），用 iSTFT 回到时域。
         output = torch.istft(sep_subband_spec.view(batch_size*nch*self.num_output, self.enc_dim, -1), 
                              n_fft=self.win, hop_length=self.stride,
                              window=torch.hann_window(self.win).to(input.device).type(input.type()), length=nsample)

@@ -1,9 +1,11 @@
 from .tiger import TIGER
 from .tiger_dnr import TIGERDNR
+from .binary_tiger import BinaryTIGER
 from .base_model import BaseModel
 
 __all__ = [
     "TIGER",
+    "BinaryTIGER",
 ]
 
 

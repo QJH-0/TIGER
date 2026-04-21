@@ -245,5 +245,7 @@ class AudioLightningModule(pl.LightningModule):
             if v is None:
                 dic[k] = str(v)
             elif isinstance(v, (list, tuple)):
-                dic[k] = torch.tensor(v)
+                # 仅把纯数值序列转成 Tensor；字符串列表等配置保持原始形态。
+                if all(isinstance(item, (bool, int, float)) for item in v):
+                    dic[k] = torch.tensor(v)
         return dic

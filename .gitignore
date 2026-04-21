@@ -5,9 +5,12 @@
 # Local debug files
 tea_debug.log
 /.cursor/
-/docs/
 /test/
 /wandb/
+.pytest_cache/
+**/__pycache__/
+Experiments/tensorboard_logs/
+Experiments/**/wandb/
 .env
 /zhuanli/
 /论文/
