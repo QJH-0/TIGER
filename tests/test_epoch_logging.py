@@ -31,6 +31,7 @@ sys.modules.setdefault("speechbrain.processing.speech_augmentation", speech_augm
 
 from look2hear.system.audio_litmodule import AudioLightningModule
 from audio_train import (
+    apply_cli_overrides,
     build_wandb_project_name,
     build_wandb_run_name,
     configure_wandb_epoch_metrics,
@@ -267,3 +268,24 @@ def test_validation_dataloader_only_returns_validation_loader():
     )
 
     assert module.val_dataloader() is val_loader
+
+
+def test_apply_cli_overrides_can_override_optimizer_learning_rate():
+    arg_dic = {
+        "training": {"epochs": 10},
+        "optimizer": {"optim_name": "Adam", "lr": 0.001},
+        "datamodule": {"data_config": {"batch_size": 4, "segment": 3.0}},
+        "main_args": {},
+    }
+    plain_args = types.SimpleNamespace(
+        epoch=None,
+        batch_size=None,
+        segment=None,
+        lr=0.0003,
+        resume=False,
+        resume_ckpt=None,
+    )
+
+    updated = apply_cli_overrides(arg_dic, plain_args)
+
+    assert updated["optimizer"]["lr"] == 0.0003

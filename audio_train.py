@@ -385,6 +385,35 @@ def load_model_checkpoint(model, checkpoint_path):
         "unexpected_keys": unexpected,
     }
 
+
+def apply_cli_overrides(arg_dic, plain_args):
+    # 如果提供了 CLI epoch，优先覆盖配置中的训练轮数。
+    if getattr(plain_args, "epoch", None) is not None:
+        if "training" in arg_dic:
+            arg_dic["training"]["epochs"] = plain_args.epoch
+
+    # CLI overrides for datamodule.*
+    # NOTE: Our YAML config is multi-level (datamodule -> data_config -> {batch_size, segment}),
+    # so we explicitly wire these overrides instead of relying on prepare_parser_from_dict.
+    if getattr(plain_args, "batch_size", None) is not None:
+        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
+            arg_dic["datamodule"]["data_config"]["batch_size"] = plain_args.batch_size
+    if getattr(plain_args, "segment", None) is not None:
+        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
+            arg_dic["datamodule"]["data_config"]["segment"] = plain_args.segment
+
+    # CLI 覆盖优化器学习率，便于快速做学习率扫描实验。
+    if getattr(plain_args, "lr", None) is not None:
+        if "optimizer" in arg_dic:
+            arg_dic["optimizer"]["lr"] = plain_args.lr
+
+    cli_resume_override = resolve_cli_resume_override(plain_args)
+    if cli_resume_override is not None:
+        arg_dic.setdefault("main_args", {})
+        arg_dic["main_args"]["resume_from_checkpoint"] = cli_resume_override
+
+    return arg_dic
+
 def main(config):
     """
     使用 PyTorch Lightning 进行训练。
@@ -605,24 +634,5 @@ if __name__ == "__main__":
 
     arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)
     # pprint(arg_dic)
-    # If provided, allow CLI to override training epochs from the yaml.
-    if getattr(plain_args, "epoch", None) is not None:
-        if "training" in arg_dic:
-            arg_dic["training"]["epochs"] = plain_args.epoch
-
-    # CLI overrides for datamodule.*
-    # NOTE: Our YAML config is multi-level (datamodule -> data_config -> {batch_size, segment}),
-    # so we explicitly wire these overrides instead of relying on prepare_parser_from_dict.
-    if getattr(plain_args, "batch_size", None) is not None:
-        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
-            arg_dic["datamodule"]["data_config"]["batch_size"] = plain_args.batch_size
-    if getattr(plain_args, "segment", None) is not None:
-        if "datamodule" in arg_dic and "data_config" in arg_dic["datamodule"]:
-            arg_dic["datamodule"]["data_config"]["segment"] = plain_args.segment
-
-    cli_resume_override = resolve_cli_resume_override(plain_args)
-    if cli_resume_override is not None:
-        arg_dic.setdefault("main_args", {})
-        arg_dic["main_args"]["resume_from_checkpoint"] = cli_resume_override
-
+    arg_dic = apply_cli_overrides(arg_dic, plain_args)
     main(arg_dic)
