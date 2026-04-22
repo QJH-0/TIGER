@@ -49,7 +49,7 @@ training:
 # Optim config
 optimizer:
   optim_name: adam
-  lr: 1.0e-4          # 学习率：batch 变小/累积变大时通常更保守
+  lr: 1.0e-3          # 学习率：batch 变小/累积变大时通常更保守
   weight_decay: 1.0e-5  # L2 正则：有助于泛化；过大可能欠拟合
 
 # Sche config
