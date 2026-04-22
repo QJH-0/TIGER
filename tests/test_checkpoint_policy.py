@@ -9,6 +9,8 @@ from audio_train import (
     build_checkpoint_callback,
     build_resume_summary_message,
     extract_resume_progress,
+    resolve_datamodule_runtime_config,
+    resolve_trainer_runtime_config,
     resolve_cli_resume_override,
     resolve_export_checkpoint_path,
     resolve_resume_checkpoint_path,
@@ -202,3 +204,77 @@ def test_build_resume_summary_message_includes_checkpoint_progress():
 
 def test_build_resume_summary_message_returns_none_without_checkpoint_path():
     assert build_resume_summary_message(None, {"epoch": 7, "global_step": 2800}) is None
+
+
+def test_resolve_trainer_runtime_config_uses_explicit_cpu_settings_when_cuda_unavailable():
+    config = {"training": {"gpus": [0, 1]}}
+
+    runtime = resolve_trainer_runtime_config(config, cuda_available=False)
+
+    assert runtime == {
+        "devices": 1,
+        "accelerator": "cpu",
+        "use_ddp": False,
+        "sync_batchnorm": False,
+        "precision": "32-true",
+    }
+
+
+def test_resolve_trainer_runtime_config_keeps_multi_gpu_ddp_when_cuda_available():
+    config = {"training": {"gpus": [0, 1], "precision": "16-mixed"}}
+
+    runtime = resolve_trainer_runtime_config(config, cuda_available=True)
+
+    assert runtime == {
+        "devices": [0, 1],
+        "accelerator": "cuda",
+        "use_ddp": True,
+        "sync_batchnorm": True,
+        "precision": "16-mixed",
+    }
+
+
+def test_resolve_datamodule_runtime_config_uses_cpu_safe_loader_settings_when_cuda_unavailable():
+    config = {
+        "datamodule": {
+            "data_config": {
+                "batch_size": 1,
+                "num_workers": 4,
+                "pin_memory": True,
+                "persistent_workers": True,
+                "segment": 4.0,
+            }
+        }
+    }
+
+    runtime = resolve_datamodule_runtime_config(config, cuda_available=False)
+
+    assert runtime == {
+        "batch_size": 1,
+        "num_workers": 0,
+        "pin_memory": False,
+        "persistent_workers": False,
+        "segment": 4.0,
+    }
+
+
+def test_resolve_datamodule_runtime_config_preserves_loader_settings_when_cuda_available():
+    config = {
+        "datamodule": {
+            "data_config": {
+                "batch_size": 1,
+                "num_workers": 4,
+                "pin_memory": True,
+                "persistent_workers": True,
+            }
+        }
+    }
+
+    runtime = resolve_datamodule_runtime_config(config, cuda_available=True)
+
+    assert runtime == {
+        "batch_size": 1,
+        "num_workers": 4,
+        "pin_memory": True,
+        "persistent_workers": True,
+    }

@@ -224,6 +224,44 @@ def build_checkpoint_callback(checkpoint_dir):
     )
 
 
+def resolve_trainer_runtime_config(config, cuda_available=None):
+    if cuda_available is None:
+        cuda_available = torch.cuda.is_available()
+
+    if cuda_available:
+        devices = config["training"]["gpus"]
+        accelerator = "cuda"
+        use_ddp = isinstance(devices, (list, tuple)) and len(devices) > 1
+        sync_batchnorm = use_ddp
+        precision = config["training"].get("precision", "16-mixed")
+    else:
+        devices = 1
+        accelerator = "cpu"
+        use_ddp = False
+        sync_batchnorm = False
+        precision = "32-true"
+
+    return {
+        "devices": devices,
+        "accelerator": accelerator,
+        "use_ddp": use_ddp,
+        "sync_batchnorm": sync_batchnorm,
+        "precision": precision,
+    }
+
+
+def resolve_datamodule_runtime_config(config, cuda_available=None):
+    if cuda_available is None:
+        cuda_available = torch.cuda.is_available()
+
+    data_config = dict(config["datamodule"]["data_config"])
+    if not cuda_available:
+        data_config["num_workers"] = 0
+        data_config["pin_memory"] = False
+        data_config["persistent_workers"] = False
+    return data_config
+
+
 def _resolve_default_last_ckpt_path(exp_dir):
     """优先新目录 checkpoints/last.ckpt，兼容旧版直接写在实验根目录下的 last.ckpt。"""
     preferred = os.path.join(lightning_checkpoint_dir(exp_dir), "last.ckpt")
@@ -432,6 +470,7 @@ def main(config):
     print_only(
         "Instantiating datamodule <{}>".format(config["datamodule"]["data_name"])
     )
+    config["datamodule"]["data_config"] = resolve_datamodule_runtime_config(config)
     datamodule: object = getattr(look2hear.datas, config["datamodule"]["data_name"])(
         **config["datamodule"]["data_config"]
     )
@@ -552,6 +591,8 @@ def main(config):
     # 仅在明确选择了多张 CUDA 卡时启用 DDP。
     use_ddp = isinstance(gpus, (list, tuple)) and len(gpus) > 1
 
+    trainer_runtime = resolve_trainer_runtime_config(config)
+
     # default logger used by trainer
     logger_dir = os.path.join(os.getcwd(), "Experiments", "tensorboard_logs")
     log_subdir = sanitize_exp_name_for_path(config["exp"]["exp_name"])
@@ -573,16 +614,16 @@ def main(config):
         max_epochs=config["training"]["epochs"],
         callbacks=callbacks,
         default_root_dir=exp_dir,
-        devices=gpus,
-        accelerator=distributed_backend,
-        strategy=DDPStrategy(find_unused_parameters=True) if use_ddp else "auto",
+        devices=trainer_runtime["devices"],
+        accelerator=trainer_runtime["accelerator"],
+        strategy=DDPStrategy(find_unused_parameters=True) if trainer_runtime["use_ddp"] else "auto",
         accumulate_grad_batches=config["training"].get("accumulate_grad_batches", 1),
         limit_train_batches=1.0,  # Useful for fast experiment
         gradient_clip_val=5.0,
         logger=comet_logger,
-        sync_batchnorm=True,
+        sync_batchnorm=trainer_runtime["sync_batchnorm"],
         # 训练精度：用配置 training.precision 控制（默认 16-mixed 省显存），避免依赖 Lightning CLI 透传参数格式。
-        precision=config["training"].get("precision", "16-mixed"),
+        precision=trainer_runtime["precision"],
         # num_sanity_val_steps=0,
         # sync_batchnorm=True,
         # fast_dev_run=True,

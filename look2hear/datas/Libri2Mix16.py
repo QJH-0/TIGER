@@ -213,6 +213,16 @@ class Libri2MixModuleRemix(LightningDataModule):
         self.data_train: Optional[Dataset] = None
         self.data_val: Optional[Dataset] = None
         self.data_test: Optional[Dataset] = None
+
+    def _loader_kwargs(self):
+        persistent_workers = bool(
+            self.hparams.persistent_workers and self.hparams.num_workers > 0
+        )
+        return {
+            "num_workers": self.hparams.num_workers,
+            "pin_memory": self.hparams.pin_memory,
+            "persistent_workers": persistent_workers,
+        }
         
     def setup(self, stage: Optional[str] = None) -> None:
         """Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
@@ -252,27 +262,24 @@ class Libri2MixModuleRemix(LightningDataModule):
         return DataLoader(
             self.data_train,
             batch_size=self.hparams.batch_size,
-            num_workers=self.hparams.num_workers,
             shuffle=True,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
         
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
             self.data_val,
             batch_size=1,
-            num_workers=self.hparams.num_workers,
             shuffle=False,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
         
     def test_dataloader(self) -> DataLoader:
         return DataLoader(
             self.data_test,
             batch_size=1,
-            num_workers=self.hparams.num_workers,
             shuffle=False,
-            pin_memory=True,
+            **self._loader_kwargs(),
         )
 
     @property
