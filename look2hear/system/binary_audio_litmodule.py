@@ -42,6 +42,7 @@ class BinaryAudioLightningModule(AudioLightningModule):
         self._apply_stage()
 
     def on_fit_start(self) -> None:
+        super().on_fit_start()
         # 启动时打印哪些模块被二值化、哪些模块被保护，便于核对映射关系。
         if self._printed_binarization_summary:
             return

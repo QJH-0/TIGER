@@ -1,5 +1,5 @@
-import sys
 import types
+import sys
 from pathlib import Path
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -30,6 +30,7 @@ sys.modules.setdefault("speechbrain.processing", processing)
 sys.modules.setdefault("speechbrain.processing.speech_augmentation", speech_augmentation)
 
 from look2hear.system.audio_litmodule import AudioLightningModule
+import look2hear.utils.lightning_utils as lightning_utils
 from audio_train import (
     apply_cli_overrides,
     build_wandb_project_name,
@@ -38,6 +39,7 @@ from audio_train import (
     save_wandb_run_metadata,
     sanitize_wandb_config,
 )
+from look2hear.utils.lightning_utils import MyRichProgressBar, RichProgressBarTheme
 
 
 def test_training_step_logs_epoch_only_train_metric_name():
@@ -289,3 +291,59 @@ def test_apply_cli_overrides_can_override_optimizer_learning_rate():
     updated = apply_cli_overrides(arg_dic, plain_args)
 
     assert updated["optimizer"]["lr"] == 0.0003
+
+
+def test_on_fit_start_prints_model_parameter_count_and_size():
+    module = AudioLightningModule(
+        audio_model=torch.nn.Sequential(
+            torch.nn.Linear(4, 3, bias=True),
+            torch.nn.Linear(3, 2, bias=False),
+        ),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 0.001}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.5),
+            "val": lambda est, tgt: torch.tensor(2.5),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {"SpeedAug": False},
+        },
+    )
+    messages = []
+    module.print = lambda message: messages.append(message)
+
+    module.on_fit_start()
+
+    assert any("[Sequential] params total=21 trainable=21 frozen=0" in message for message in messages)
+    assert any("[Sequential] size_mb fp32_estimated=" in message for message in messages)
+
+
+def test_my_rich_progress_bar_uses_one_line_epoch_summary_when_stdout_is_not_tty(monkeypatch):
+    class NonInteractiveStdout:
+        def isatty(self):
+            return False
+
+    monkeypatch.setattr(sys, "stdout", NonInteractiveStdout())
+    messages = []
+    monkeypatch.setattr(lightning_utils, "print_only", lambda message: messages.append(message))
+
+    progress_bar = MyRichProgressBar(theme=RichProgressBarTheme())
+    progress_bar.get_metrics = lambda trainer, pl_module: {
+        "train/loss": -13.087,
+        "val/loss": -11.480,
+        "val/si_snr": 11.484,
+        "v_num": "xj5x",
+    }
+    trainer = types.SimpleNamespace(
+        current_epoch=219,
+        max_epochs=280,
+        sanity_checking=False,
+        state=types.SimpleNamespace(fn="fit"),
+    )
+
+    progress_bar.on_validation_end(trainer, object())
+    progress_bar.on_validation_end(trainer, object())
+
+    assert messages == [
+        "Epoch 220/280 train/loss: -13.087 val/loss: -11.480 val/si_snr: 11.484"
+    ]

@@ -61,6 +61,7 @@ class AudioLightningModule(pl.LightningModule):
         self.save_hyperparameters(self.config_to_hparams(self.config))
         # self.print(self.audio_model)
         self.validation_step_outputs = []
+        self._printed_model_size_summary = False
 
     def _normalize_scheduler_monitor(self, monitor):
         # 兼容旧配置中遗留的 monitor 命名。
@@ -249,3 +250,42 @@ class AudioLightningModule(pl.LightningModule):
                 if all(isinstance(item, (bool, int, float)) for item in v):
                     dic[k] = torch.tensor(v)
         return dic
+
+    @staticmethod
+    def _model_size_summary(model):
+        total_params = sum(parameter.numel() for parameter in model.parameters())
+        trainable_params = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+        frozen_params = total_params - trainable_params
+        actual_bytes = sum(parameter.numel() * parameter.element_size() for parameter in model.parameters())
+        fp32_estimated_bytes = total_params * 4
+        return {
+            "total_params": int(total_params),
+            "trainable_params": int(trainable_params),
+            "frozen_params": int(frozen_params),
+            "actual_param_bytes": int(actual_bytes),
+            "actual_param_size_mb": round(actual_bytes / (1024 ** 2), 4),
+            "fp32_estimated_bytes": int(fp32_estimated_bytes),
+            "fp32_estimated_size_mb": round(fp32_estimated_bytes / (1024 ** 2), 4),
+        }
+
+    def _print_model_size_summary(self, model=None, label=None):
+        model = self.audio_model if model is None else model
+        if model is None:
+            return
+
+        summary = self._model_size_summary(model)
+        label = label or type(model).__name__
+        self.print(
+            f"[{label}] params total={summary['total_params']} "
+            f"trainable={summary['trainable_params']} frozen={summary['frozen_params']}"
+        )
+        self.print(
+            f"[{label}] size_mb fp32_estimated={summary['fp32_estimated_size_mb']} "
+            f"actual={summary['actual_param_size_mb']}"
+        )
+
+    def on_fit_start(self) -> None:
+        if self._printed_model_size_summary:
+            return
+        self._print_model_size_summary()
+        self._printed_model_size_summary = True

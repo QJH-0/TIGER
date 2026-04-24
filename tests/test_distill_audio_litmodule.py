@@ -99,3 +99,43 @@ def test_distill_module_logs_task_and_kd_loss_separately():
     assert "train/kd_loss" in logged
     assert "train/loss" in logged
     assert "loss" in result
+
+
+def test_on_fit_start_prints_student_and_teacher_model_stats():
+    class DummyStudent(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer = torch.nn.Linear(4, 3)
+
+        def forward(self, mixtures):
+            return mixtures
+
+    class DummyTeacher(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer = torch.nn.Linear(4, 2, bias=False)
+
+        def forward(self, mixtures):
+            return mixtures
+
+    module = DistillAudioLightningModule(
+        audio_model=DummyStudent(),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {"SpeedAug": False},
+            "distillation": {"enabled": True},
+        },
+        teacher_model=DummyTeacher(),
+    )
+    messages = []
+    module.print = lambda message: messages.append(message)
+
+    module.on_fit_start()
+
+    assert any("[DummyStudent] params total=15 trainable=15 frozen=0" in message for message in messages)
+    assert any("[Teacher:DummyTeacher] params total=8 trainable=8 frozen=0" in message for message in messages)

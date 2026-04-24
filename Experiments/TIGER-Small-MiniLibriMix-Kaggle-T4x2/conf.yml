@@ -12,12 +12,12 @@ datamodule:
   data_config:
     batch_size: 1
     n_src: 2
-    normalize_audio: false
+    normalize_audio: true
     num_workers: 4
-    persistent_workers: false
+    persistent_workers: true
     pin_memory: true
     sample_rate: 16000
-    segment: 3.0
+    segment: 4.0
     test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
     train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
     valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
@@ -38,9 +38,9 @@ loss:
     loss_func: PITLossWrapper
     sdr_type: pairwise_neg_sisdr
 main_args:
-  batch_size: 1
+  batch_size: null
   conf_dir: configs/tiger-small-kaggle-t4x2.yml
-  epoch: 250
+  epoch: 280
   exp_dir: /kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2
   help: null
   resume: true
@@ -50,23 +50,25 @@ main_args:
 optimizer:
   lr: 0.001
   optim_name: adam
-  weight_decay: 0
+  weight_decay: 1.0e-05
 positional arguments: {}
 scheduler:
   sche_config:
     factor: 0.5
-    patience: 10
+    patience: 15
   sche_name: ReduceLROnPlateau
 training:
-  SpeedAug: false
+  SpeedAug: true
+  accumulate_grad_batches: 4
   early_stop:
     mode: min
     monitor: val/loss
     patience: 20
     verbose: true
-  epochs: 250
+  epochs: 280
   gpus:
   - 0
   - 1
   parallel: ddp
+  precision: 16-mixed
   system: AudioLightningModule

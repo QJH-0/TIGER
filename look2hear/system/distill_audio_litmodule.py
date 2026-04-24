@@ -20,6 +20,14 @@ class DistillAudioLightningModule(AudioLightningModule):
             top_k_percent=float(self.distill_config.get("top_k_percent", 0.3)),
         )
 
+    def on_fit_start(self) -> None:
+        super().on_fit_start()
+        if self.teacher_model is not None:
+            self._print_model_size_summary(
+                model=self.teacher_model,
+                label=f"Teacher:{type(self.teacher_model).__name__}",
+            )
+
     def training_step(self, batch, batch_nb):
         mixtures, targets, _ = batch
         est_sources = self(mixtures)
