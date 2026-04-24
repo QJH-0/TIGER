@@ -65,8 +65,9 @@ class MyRichProgressBar(RichProgressBar):
     """Use rich progress interactively and epoch summaries in captured logs."""
 
     def __init__(self, *args, **kwargs):
+        force_single_line = kwargs.pop("force_single_line", False)
         super().__init__(*args, **kwargs)
-        self._single_line_epoch_mode = self._should_use_single_line_epoch_mode()
+        self._single_line_epoch_mode = force_single_line or self._should_use_single_line_epoch_mode()
         self._last_summarized_epoch = None
 
     def _should_use_single_line_epoch_mode(self) -> bool:
@@ -167,6 +168,36 @@ class MyRichProgressBar(RichProgressBar):
                 self._print_epoch_summary_once(trainer, pl_module)
             return
         super().on_train_epoch_end(trainer, pl_module)
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx: int) -> None:
+        if self._single_line_epoch_mode:
+            return
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+
+    def on_validation_batch_start(
+        self,
+        trainer,
+        pl_module,
+        batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        if self._single_line_epoch_mode:
+            return
+        super().on_validation_batch_start(trainer, pl_module, batch, batch_idx, dataloader_idx)
+
+    def on_validation_batch_end(
+        self,
+        trainer,
+        pl_module,
+        outputs,
+        batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        if self._single_line_epoch_mode:
+            return
+        super().on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx, dataloader_idx)
 
     def _get_train_description(self, current_epoch: int) -> str:
         max_e = self.trainer.max_epochs

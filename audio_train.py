@@ -582,7 +582,7 @@ def main(config):
     if config["training"]["early_stop"]:
         print_only("Instantiating EarlyStopping")
         callbacks.append(EarlyStopping(**config["training"]["early_stop"]))
-    callbacks.append(MyRichProgressBar(theme=RichProgressBarTheme()))
+    callbacks.append(MyRichProgressBar(theme=RichProgressBarTheme(), force_single_line=True))
 
     # Don't ask GPU if they are not available.
     # 单卡/无 GPU：走 Lightning 默认策略；多卡且明确选择多张 CUDA 卡：启用 DDP。

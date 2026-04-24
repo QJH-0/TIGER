@@ -66,7 +66,7 @@ scheduler:
 distillation:
   enabled: true
   teacher_ckpt: Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2/best_model.pth
-  student_init_ckpt: Experiments/TIGER-MiniLibriMix-Binary/best_model.pth
+  student_init_ckpt: Experiments/TIGER-Small-Binary-Kaggle-T4x2/best_model.pth
   kd_lambda: 0.3
   n_fft: 640
   hop_length: 160

@@ -347,3 +347,60 @@ def test_my_rich_progress_bar_uses_one_line_epoch_summary_when_stdout_is_not_tty
     assert messages == [
         "Epoch 220/280 train/loss: -13.087 val/loss: -11.480 val/si_snr: 11.484"
     ]
+
+
+def test_my_rich_progress_bar_can_force_one_line_epoch_summary_even_with_tty(monkeypatch):
+    class InteractiveStdout:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdout", InteractiveStdout())
+    messages = []
+    monkeypatch.setattr(lightning_utils, "print_only", lambda message: messages.append(message))
+
+    progress_bar = MyRichProgressBar(theme=RichProgressBarTheme(), force_single_line=True)
+    progress_bar.get_metrics = lambda trainer, pl_module: {
+        "train/loss": -6.114,
+        "val/loss": -10.003,
+        "val/si_snr": 10.000,
+        "v_num": "jz08",
+    }
+    trainer = types.SimpleNamespace(
+        current_epoch=0,
+        max_epochs=1,
+        sanity_checking=False,
+        state=types.SimpleNamespace(fn="fit"),
+    )
+
+    progress_bar.on_validation_end(trainer, object())
+
+    assert messages == [
+        "Epoch 1/1 train/loss: -6.114 val/loss: -10.003 val/si_snr: 10.000"
+    ]
+
+
+def test_my_rich_progress_bar_single_line_mode_skips_validation_batch_progress_callbacks():
+    progress_bar = MyRichProgressBar(theme=RichProgressBarTheme(), force_single_line=True)
+    trainer = types.SimpleNamespace(
+        sanity_checking=False,
+        state=types.SimpleNamespace(fn="fit"),
+    )
+
+    progress_bar.on_validation_batch_start(trainer, object(), batch=None, batch_idx=0, dataloader_idx=0)
+    progress_bar.on_validation_batch_end(trainer, object(), outputs=None, batch=None, batch_idx=0, dataloader_idx=0)
+
+    assert progress_bar.progress is None
+
+
+def test_my_rich_progress_bar_single_line_mode_skips_train_batch_progress_callbacks():
+    progress_bar = MyRichProgressBar(theme=RichProgressBarTheme(), force_single_line=True)
+
+    progress_bar.on_train_batch_end(
+        types.SimpleNamespace(),
+        object(),
+        outputs=None,
+        batch=None,
+        batch_idx=0,
+    )
+
+    assert progress_bar.progress is None
