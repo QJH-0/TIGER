@@ -8,6 +8,7 @@ from audio_test import resolve_eval_model_source
 from audio_train import (
     build_checkpoint_callback,
     build_resume_summary_message,
+    cleanup_training_runtime,
     extract_resume_progress,
     resolve_datamodule_runtime_config,
     resolve_trainer_runtime_config,
@@ -278,3 +279,45 @@ def test_resolve_datamodule_runtime_config_preserves_loader_settings_when_cuda_a
         "pin_memory": True,
         "persistent_workers": True,
     }
+
+
+def test_cleanup_training_runtime_releases_trainer_wandb_cuda_and_distributed_resources():
+    trainer = types.SimpleNamespace(teardown=lambda: None)
+    trainer.teardown = types.MethodType(lambda self: None, trainer)
+    wandb_module = types.SimpleNamespace(finish=lambda: None)
+    cuda_module = types.SimpleNamespace(empty_cache=lambda: None)
+    distributed_module = types.SimpleNamespace(
+        is_initialized=lambda: True,
+        destroy_process_group=lambda: None,
+    )
+
+    calls = []
+    trainer.teardown = lambda: calls.append("trainer")
+    wandb_module.finish = lambda: calls.append("wandb")
+    cuda_module.empty_cache = lambda: calls.append("cuda")
+    distributed_module.destroy_process_group = lambda: calls.append("distributed")
+
+    cleanup_training_runtime(
+        trainer=trainer,
+        wandb_module=wandb_module,
+        cuda_module=cuda_module,
+        distributed_module=distributed_module,
+    )
+
+    assert calls == ["trainer", "wandb", "cuda", "distributed"]
+
+
+def test_cleanup_training_runtime_skips_distributed_teardown_when_process_group_is_not_initialized():
+    distributed_module = types.SimpleNamespace(
+        is_initialized=lambda: False,
+        destroy_process_group=lambda: (_ for _ in ()).throw(
+            AssertionError("destroy_process_group should not be called")
+        ),
+    )
+
+    cleanup_training_runtime(
+        trainer=None,
+        wandb_module=types.SimpleNamespace(finish=lambda: None),
+        cuda_module=types.SimpleNamespace(empty_cache=lambda: None),
+        distributed_module=distributed_module,
+    )

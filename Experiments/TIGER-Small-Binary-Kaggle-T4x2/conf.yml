@@ -56,8 +56,9 @@ main_args:
   epoch: 200
   exp_dir: /kaggle/working/TIGER/Experiments/TIGER-Small-Binary-Kaggle-T4x2
   help: null
-  resume: false
+  resume: true
   resume_ckpt: null
+  resume_from_checkpoint: true
   segment: null
 optimizer:
   lr: 0.001

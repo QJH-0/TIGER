@@ -655,6 +655,22 @@ def main(config):
     torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
 
 
+def cleanup_training_runtime(
+    trainer=None,
+    wandb_module=wandb,
+    cuda_module=torch.cuda,
+    distributed_module=torch.distributed,
+):
+    if trainer is not None:
+        trainer.teardown()
+    if wandb_module is not None:
+        wandb_module.finish()
+    if cuda_module is not None:
+        cuda_module.empty_cache()
+    if distributed_module is not None and distributed_module.is_initialized():
+        distributed_module.destroy_process_group()
+
+
 if __name__ == "__main__":
     import yaml
     from pprint import pprint
@@ -677,3 +693,5 @@ if __name__ == "__main__":
     # pprint(arg_dic)
     arg_dic = apply_cli_overrides(arg_dic, plain_args)
     main(arg_dic)
+    cleanup_training_runtime()
+    print("TRAINING_SCRIPT_DONE")
