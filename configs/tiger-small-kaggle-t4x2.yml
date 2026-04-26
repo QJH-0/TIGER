@@ -46,7 +46,7 @@ training:
     # Lightning 训练期只使用验证集，因此 monitor 直接使用 val/loss
     monitor: val/loss
     mode: min
-    patience: 20
+    patience: 40
     verbose: true
   SpeedAug: true  # 速度扰动数据增强（在 System 的 training_step 内生效）；不稳定时可关掉对比
 
@@ -74,7 +74,7 @@ datamodule:
     test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
     n_src: 2
     sample_rate: 16000
-    segment: 4.0          # 片段长度（秒）：越长越吃显存/但训练更充分；OOM 就降到 3.0/2.0
+    segment: 3.0          # 片段长度（秒）：越长越吃显存/但训练更充分；OOM 就降到 3.0/2.0
     normalize_audio: true # 是否归一化：通常更稳；如发现响度信息有用可再评估
     batch_size: 1         # 每卡 batch：OOM 优先降它，再用 accumulate_grad_batches 补有效 batch
     num_workers: 4

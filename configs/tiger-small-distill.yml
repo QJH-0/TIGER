@@ -48,7 +48,7 @@ training:
   early_stop:
     monitor: val/loss
     mode: min
-    patience: 20
+    patience: 40
     verbose: true
   SpeedAug: true
 
@@ -82,7 +82,7 @@ datamodule:
     test_dir: DataPreProcess/MiniLibriMix-mini/test
     n_src: 2
     sample_rate: 16000
-    segment: 4.0
+    segment: 3.0
     normalize_audio: true
     batch_size: 1
     num_workers: 0

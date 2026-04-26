@@ -42,7 +42,7 @@ training:
     # Lightning 训练期只使用验证集，因此 monitor 直接使用 val/loss
     monitor: val/loss
     mode: min
-    patience: 20
+    patience: 40
     verbose: true
   SpeedAug: true  # 速度扰动数据增强（在 training_step 内生效）
   
@@ -73,7 +73,7 @@ datamodule:
     test_dir: DataPreProcess/MiniLibriMix-mini/test
     n_src: 2
     sample_rate: 16000
-    segment: 4.0          # 片段长度（秒）：越长越吃显存；OOM 就降到 3.0/2.0
+    segment: 3.0          # 片段长度（秒）：越长越吃显存；OOM 就降到 3.0/2.0
     normalize_audio: true # 归一化：通常更稳
     batch_size: 1
     num_workers: 0
