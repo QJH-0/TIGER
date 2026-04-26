@@ -75,7 +75,10 @@ class TIGERBinaryConverter:
         if self.protect_attention and self._is_attention_module(full_name, module):
             return True
         if self.protect_1x1_conv and module.kernel_size == (1,):
-            return True
+            # 仅保护信息瓶颈/重构路径上的 1x1 投影，避免过度保护导致二值化覆盖率下降。
+            full_name_l = full_name.lower()
+            if "band" in full_name_l or "recover" in full_name_l:
+                return True
         if self.protect_output_layer and self._is_output_module(full_name):
             return True
         return False
@@ -130,7 +133,8 @@ class TIGERBinaryConverter:
             groups=module.groups,
             bias=module.bias is not None,
         )
-        converted.load_state_dict(module.state_dict())
+        # BinaryConv1d 可能带额外 buffer（如 weight_scale）；从原始 Conv1d 加载时允许缺失。
+        converted.load_state_dict(module.state_dict(), strict=False)
         return converted
 
     @staticmethod

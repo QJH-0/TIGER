@@ -134,7 +134,7 @@ def _format_segment_for_wandb(segment):
 
 
 def build_wandb_project_name(config):
-    return "tiger-speech-separation"
+    return "tiger-speech-separation-model"
 
 
 def build_wandb_run_name(config):
@@ -562,6 +562,19 @@ def main(config):
         teacher_ckpt = distill_config.get("teacher_ckpt")
         if not teacher_ckpt:
             raise ValueError("DistillAudioLightningModule requires distillation.teacher_ckpt")
+        teacher_model_kwargs = dict(config["audionet"]["audionet_config"])
+        teacher_model_kwargs.pop("binary_config", None)
+        print_only(f"Loading teacher checkpoint <{teacher_ckpt}>")
+        system.teacher_model = load_teacher_tiger(
+            checkpoint_path=teacher_ckpt,
+            model_kwargs=teacher_model_kwargs,
+            sample_rate=config["datamodule"]["data_config"]["sample_rate"],
+        )
+    if config["training"]["system"] == "ReactNetAudioLightningModule":
+        reactnet_cfg = config.get("reactnet", {}) or {}
+        teacher_ckpt = reactnet_cfg.get("teacher_ckpt")
+        if not teacher_ckpt:
+            raise ValueError("ReactNetAudioLightningModule requires reactnet.teacher_ckpt")
         teacher_model_kwargs = dict(config["audionet"]["audionet_config"])
         teacher_model_kwargs.pop("binary_config", None)
         print_only(f"Loading teacher checkpoint <{teacher_ckpt}>")

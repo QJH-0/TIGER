@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .audio_litmodule import AudioLightningModule
+from ..layers.binary_layers import RPReLU
 
 
 class BinaryAudioLightningModule(AudioLightningModule):
@@ -34,6 +35,11 @@ class BinaryAudioLightningModule(AudioLightningModule):
         stage = self._resolve_stage()
         if hasattr(self.audio_model, "set_binary_training"):
             self.audio_model.set_binary_training(stage in {"binary", "weight_binarize", "finetune"})
+        # ReActNet 风格渐进策略：activation_warmup / warmup 阶段禁用 RPReLU，后续再启用。
+        enable_rprelu = stage not in {"activation_warmup", "warmup"}
+        for module in self.audio_model.modules():
+            if isinstance(module, RPReLU):
+                module.active = enable_rprelu
         if stage in {"binary", "weight_binarize", "finetune"} and hasattr(self.audio_model, "clamp_all_binary_weights"):
             self.audio_model.clamp_all_binary_weights()
         return stage

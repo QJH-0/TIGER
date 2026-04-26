@@ -23,6 +23,7 @@ audionet:
         - v_proj
         - mask_gen
         - istft
+        - output
 
 loss:
   train:
@@ -67,9 +68,17 @@ distillation:
   enabled: true
   teacher_ckpt: Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2/best_model.pth
   student_init_ckpt: Experiments/TIGER-Small-Binary-Kaggle-T4x2/best_model.pth
+  # 旧版兼容字段：若未启用 lambda_kd_schedule，将采用混合系数 (1-kd_lambda)*task + kd_lambda*kd_loss
   kd_lambda: 0.3
+  # 新版：lambda_kd 余弦衰减 (1.0 -> 0.1)，用于 task_loss + lambda_kd*kd_loss
+  lambda_kd_schedule: cosine
+  lambda_kd_range: [1.0, 0.1]
   n_fft: 640
   hop_length: 160
+  # MSSP：低频大 patch，高频小 patch；未配置时会退回到 patch_size 单尺度模式
+  low_freq_patch_size: 32
+  high_freq_patch_size: 8
+  split_freq_bin: 64
   patch_size: 16
   top_k_percent: 0.3
   use_multi_scale: false
