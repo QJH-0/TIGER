@@ -17,7 +17,7 @@ datamodule:
     persistent_workers: true
     pin_memory: true
     sample_rate: 16000
-    segment: 4.0
+    segment: 3.0
     test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
     train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
     valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
@@ -40,12 +40,11 @@ loss:
 main_args:
   batch_size: null
   conf_dir: configs/tiger-small-kaggle-t4x2.yml
-  epoch: 280
+  epoch: 130
   exp_dir: /kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2
   help: null
-  resume: true
+  resume: false
   resume_ckpt: null
-  resume_from_checkpoint: true
   segment: null
 optimizer:
   lr: 0.001
@@ -63,9 +62,9 @@ training:
   early_stop:
     mode: min
     monitor: val/loss
-    patience: 20
+    patience: 40
     verbose: true
-  epochs: 280
+  epochs: 130
   gpus:
   - 0
   - 1

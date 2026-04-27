@@ -82,4 +82,5 @@ datamodule:
     persistent_workers: true
 
 exp:
-  exp_name: TIGER-MiniLibriMix-Binary
+  exp_name: TIGER-Small-Binary-Kaggle-T4x2
+  # exp_name: TIGER-MiniLibriMix-Binary
