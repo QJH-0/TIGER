@@ -1,0 +1,27 @@
+{
+  "config": {
+    "exp_name": "TIGER-Small-MiniLibriMix-Kaggle-T4x2",
+    "exp_dir": "/kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2",
+    "binary_stage_epochs": null,
+    "freeze_scope": [],
+    "total_epochs_completed": 393,
+    "max_epochs": 400,
+    "conf_path": "/kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2/conf.yml"
+  },
+  "metrics": {
+    "val_loss": -11.951,
+    "best_val_loss": -12.00484848022461,
+    "best_checkpoint_path": "/kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2/checkpoints/best.ckpt",
+    "train_loss": -13.171,
+    "sdr": 11.54,
+    "sdr_i": 11.398,
+    "si_snr": 10.826,
+    "si_snr_i": 10.838,
+    "si_snri": 10.838
+  },
+  "sensitivity": {},
+  "efficiency": {
+    "fp32_estimated_size_mb": 3.1354,
+    "actual_param_size_mb": 3.1354
+  }
+}
