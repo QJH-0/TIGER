@@ -1,0 +1,81 @@
+# Kaggle 双 T4：阶段零 S0（BN 单独二值化）
+# 数据：完整 MiniLibriMix 索引
+
+audionet:
+  audionet_name: BinaryTIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+    binary_config:
+      protect_first_layer: true
+      protect_attention: true
+      protect_1x1_conv: false
+      protect_output_layer: true
+      enable_binary_linear: false
+      binarize_scope: ["bn"]
+      protect_patterns:
+        - istft
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: BinaryAudioLightningModule
+  gpus: [0, 1]
+  parallel: ddp
+  epochs: 15
+  accumulate_grad_batches: 1
+  precision: 16-mixed
+  binary_stage_epochs:
+    activation_warmup: 5
+    weight_binarize: 10
+  warmup_ckpt: /kaggle/working/TIGER/Experiments/TIGER-Small-MiniLibriMix-Kaggle-T4x2/best_model.pth
+  freeze_scope: ["bn"]
+  early_stop:
+    monitor: val/loss
+    mode: min
+    patience: 3
+    verbose: true
+  SpeedAug: false
+
+optimizer:
+  optim_name: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+scheduler:
+  sche_name: null
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
+    valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
+    test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 2.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+
+exp:
+  exp_name: TIGER-Small-Binary-S0-BN-Kaggle-T4x2

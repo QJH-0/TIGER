@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 import argparse
 import json
+import yaml
 import look2hear.datas
 import look2hear.models
 import look2hear.system
@@ -33,7 +34,6 @@ warnings.filterwarnings("ignore")
 import wandb
 
 #手动登录
-wandb.login()
 
 """
 TIGER 训练脚本。
@@ -135,6 +135,10 @@ def _format_segment_for_wandb(segment):
 
 def build_wandb_project_name(config):
     return "tiger-speech-separation-model"
+
+
+def ensure_wandb_login(wandb_module=wandb):
+    wandb_module.login()
 
 
 def build_wandb_run_name(config):
@@ -417,6 +421,10 @@ def extract_model_state_dict(checkpoint_payload):
 def load_model_checkpoint(model, checkpoint_path):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = extract_model_state_dict(checkpoint)
+    # BinaryTIGER 在 converter 中插入了 RSign，导致 Sequential 索引偏移。
+    # 加载旧 checkpoint 时需要重映射键名以匹配新结构。
+    if hasattr(model, "remap_checkpoint_keys"):
+        state_dict = model.remap_checkpoint_keys(state_dict)
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     return {
         "missing_keys": missing,
@@ -492,9 +500,23 @@ def main(config):
     if student_init_ckpt:
         print_only(f"Loading student init checkpoint <{student_init_ckpt}>")
         load_model_checkpoint(model, student_init_ckpt)
+
+    # 阶段一共享预热 checkpoint：从预训练的 RSign/RPReLU checkpoint 出发
+    training_config = config.get("training", {})
+    warmup_ckpt = training_config.get("warmup_ckpt")
+    if warmup_ckpt:
+        print_only(f"Loading warmup checkpoint <{warmup_ckpt}>")
+        load_model_checkpoint(model, warmup_ckpt)
+
+    # 初始化 EMA Scale（BinaryTIGER 专用，加载预训练权重后调用一次）
+    if hasattr(model, "init_all_scales"):
+        print_only("Initializing EMA scales from pretrained weights")
+        model.init_all_scales()
     # import pdb; pdb.set_trace()
     print_only("Instantiating Optimizer <{}>".format(config["optimizer"]["optim_name"]))
-    optimizer = make_optimizer(model.parameters(), **config["optimizer"])
+    # param_groups 是蒸馏参数分组配置，不属于优化器构造参数，需要过滤掉
+    optimizer_kwargs = {k: v for k, v in config["optimizer"].items() if k != "param_groups"}
+    optimizer = make_optimizer(model.parameters(), **optimizer_kwargs)
 
     # 学习率调度器：根据配置选择开启或不启用。
     scheduler = None
@@ -558,23 +580,10 @@ def main(config):
         scheduler=scheduler,
         config=config,
     )
-    if config["training"]["system"] == "DistillAudioLightningModule":
+    if config["training"]["system"] == "BinaryDistillAudioLitModule":
         teacher_ckpt = distill_config.get("teacher_ckpt")
         if not teacher_ckpt:
-            raise ValueError("DistillAudioLightningModule requires distillation.teacher_ckpt")
-        teacher_model_kwargs = dict(config["audionet"]["audionet_config"])
-        teacher_model_kwargs.pop("binary_config", None)
-        print_only(f"Loading teacher checkpoint <{teacher_ckpt}>")
-        system.teacher_model = load_teacher_tiger(
-            checkpoint_path=teacher_ckpt,
-            model_kwargs=teacher_model_kwargs,
-            sample_rate=config["datamodule"]["data_config"]["sample_rate"],
-        )
-    if config["training"]["system"] == "ReactNetAudioLightningModule":
-        reactnet_cfg = config.get("reactnet", {}) or {}
-        teacher_ckpt = reactnet_cfg.get("teacher_ckpt")
-        if not teacher_ckpt:
-            raise ValueError("ReactNetAudioLightningModule requires reactnet.teacher_ckpt")
+            raise ValueError("BinaryDistillAudioLitModule requires distillation.teacher_ckpt")
         teacher_model_kwargs = dict(config["audionet"]["audionet_config"])
         teacher_model_kwargs.pop("binary_config", None)
         print_only(f"Loading teacher checkpoint <{teacher_ckpt}>")
@@ -611,6 +620,7 @@ def main(config):
     log_subdir = sanitize_exp_name_for_path(config["exp"]["exp_name"])
     os.makedirs(os.path.join(logger_dir, log_subdir), exist_ok=True)
     # comet_logger = TensorBoardLogger(logger_dir, name=config["exp"]["exp_name"])
+    ensure_wandb_login()
     comet_logger = WandbLogger(
             name=build_wandb_run_name(config), 
             save_dir=os.path.join(logger_dir, log_subdir), 
@@ -685,7 +695,6 @@ def cleanup_training_runtime(
 
 
 if __name__ == "__main__":
-    import yaml
     from pprint import pprint
     from look2hear.utils.parser_utils import (
         prepare_parser_from_dict,
@@ -705,6 +714,8 @@ if __name__ == "__main__":
     arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)
     # pprint(arg_dic)
     arg_dic = apply_cli_overrides(arg_dic, plain_args)
-    main(arg_dic)
-    cleanup_training_runtime()
+    try:
+        main(arg_dic)
+    finally:
+        cleanup_training_runtime()
     print("TRAINING_SCRIPT_DONE")

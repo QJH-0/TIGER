@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python audio_train.py *)",
+      "Bash(python audio_test.py *)",
+      "Bash(python inference_*.py *)",
+      "Bash(python app.py *)",
+      "Bash(python plot_figures.py *)",
+      "Bash(python analyze_experiments.py *)",
+      "Bash(python evaluated_mac_params.py *)",
+      "Bash(python DataPreProcess/*.py *)"
+    ]
+  }
+}

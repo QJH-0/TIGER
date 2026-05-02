@@ -1,0 +1,86 @@
+# Kaggle 双 T4：阶段一 B4（全二值化含 F3A）
+# 数据：完整 MiniLibriMix 索引
+
+audionet:
+  audionet_name: BinaryTIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+    binary_config:
+      protect_first_layer: true
+      protect_attention: false
+      protect_1x1_conv: false
+      protect_output_layer: true
+      enable_binary_linear: false
+      binarize_scope: ["bn", "mask", "dw", "pw", "f3a"]
+      protect_patterns:
+        - istft
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: BinaryAudioLightningModule
+  gpus: [0, 1]
+  parallel: ddp
+  epochs: 50
+  accumulate_grad_batches: 4
+  precision: 16-mixed
+  binary_stage_epochs:
+    activation_warmup: 20
+    weight_binarize: 30
+  warmup_ckpt: /kaggle/working/TIGER/Experiments/TIGER-Small-Binary-B0-Kaggle-T4x2/checkpoints/best.ckpt
+  checkpoint_epoch: 30
+  checkpoint_threshold: 0.25
+  fp32_baseline_val_loss: -12.0048
+  early_stop:
+    monitor: val/loss
+    mode: min
+    patience: 20
+    verbose: true
+  SpeedAug: true
+
+optimizer:
+  optim_name: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+scheduler:
+  sche_name: CosineAnnealingLR
+  sche_config:
+    T_max: 30
+    eta_min: 1.0e-4
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: /kaggle/working/DataPreProcess/MiniLibriMix/train
+    valid_dir: /kaggle/working/DataPreProcess/MiniLibriMix/val
+    test_dir: /kaggle/working/DataPreProcess/MiniLibriMix/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 3.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+
+exp:
+  exp_name: TIGER-Small-Binary-B4-Full-Kaggle-T4x2

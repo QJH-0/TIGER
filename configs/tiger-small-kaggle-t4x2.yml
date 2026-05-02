@@ -1,8 +1,5 @@
-# Kaggle T4x2 training config for TIGER-small on MiniLibriMix.
-# Expected workflow on Kaggle:
-# 1. Raw MiniLibriMix dataset is mounted under /kaggle/input/<your-dataset-name>
-# 2. Run DataPreProcess/process_librimix.py to generate JSON indexes into /kaggle/working/DataPreProcess/MiniLibriMix
-# 3. Train with this config
+# Kaggle 双 T4：全精度 small 正式训练
+# 数据：完整 MiniLibriMix 索引
 
 # Network config
 audionet:

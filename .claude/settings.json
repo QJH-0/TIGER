@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(pwd)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(find *)",
+      "Bash(which *)",
+      "Bash(echo *)",
+      "Bash(date *)",
+      "Bash(env *)",
+      "Bash(printenv *)",
+      "Bash(git *)",
+      "Bash(python -m pytest *)",
+      "Bash(python *)",
+      "Bash(pip *)",
+      "Bash(pytest *)",
+      "Bash(dir *)",
+      "Bash(type *)",
+      "Bash(where *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(Get-Content *)",
+      "Bash(Test-Path *)",
+      "Bash(New-Item *)",
+      "Bash(Remove-Item *)",
+      "Bash(Move-Item *)",
+      "Bash(Copy-Item *)",
+      "Bash(Set-Location *)",
+      "Bash(Get-Location *)",
+      "Bash(gh *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Skill",
+      "TodoWrite",
+      "AskUserQuestion"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\20448\\.claude"
+    ]
+  }
+}

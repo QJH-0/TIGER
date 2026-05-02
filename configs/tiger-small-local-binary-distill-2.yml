@@ -1,0 +1,97 @@
+# ?????? 2
+# ???MiniLibriMix-mini ??????
+
+audionet:
+  audionet_name: BinaryTIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+    binary_config:
+      protect_first_layer: true
+      protect_attention: true
+      protect_1x1_conv: false
+      protect_output_layer: true
+      enable_binary_linear: false
+      protect_patterns:
+        - bandsplit.proj
+        - q_proj
+        - k_proj
+        - v_proj
+        - mask_gen
+        - istft
+        - output
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: BinaryDistillAudioLitModule
+  gpus: [0]
+  parallel: none
+  epochs: 1
+  accumulate_grad_batches: 1
+  precision: 16-mixed
+  binary_stage_epochs:
+    activation_warmup: 0
+    weight_binarize: 0
+  early_stop: null
+  SpeedAug: false
+
+optimizer:
+  optim_name: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  param_groups:
+    fp32_lr: 5.0e-5
+    binary_lr: 1.0e-3
+
+scheduler:
+  sche_name: CosineAnnealingLR
+  sche_config:
+    T_max: 1
+    eta_min: 1.0e-4
+
+distillation:
+  enabled: true
+  kd_type: d2
+  teacher_ckpt: Experiments/TIGER-MiniLibriMix-Local/best_model.pth
+  student_init_ckpt: Experiments/TIGER-Small-Binary-Local/best_model.pth
+  distill_warmup_epochs: 0
+  loss_calibration: true
+  lambda_band_range: [1.0, 0.1]
+  n_fft: 640
+  hop_length: 160
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: DataPreProcess/MiniLibriMix-mini/train
+    valid_dir: DataPreProcess/MiniLibriMix-mini/val
+    test_dir: DataPreProcess/MiniLibriMix-mini/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 2.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+
+exp:
+  exp_name: TIGER-Small-Binary-Distill-D2-Local

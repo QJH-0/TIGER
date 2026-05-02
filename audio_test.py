@@ -20,6 +20,8 @@ import look2hear.datas
 from look2hear.metrics import MetricsTracker
 from look2hear.utils import tensors_to_device, RichProgressBarTheme, MyMetricsTextColumn, BatchesProcessedColumn
 from audio_train import build_wandb_project_name, sanitize_exp_name_for_path
+from look2hear.layers.binary_layers import RPReLU, RSign
+from look2hear.system.binary_audio_litmodule import _AmpCompatiblePReLU
 
 from rich.progress import (
     BarColumn,
@@ -50,6 +52,11 @@ compute_metrics = ["si_sdr", "sdr"]
 os.environ['CUDA_VISIBLE_DEVICES'] = "8"
 # 显式指定可见 GPU（用于固定推理使用的卡号；不影响 CPU 逻辑）。
 
+def result_audio_filename(key):
+    normalized = str(key).replace("\\", "/")
+    return os.path.basename(normalized)
+
+
 def resolve_eval_model_source(config, exp_dir):
     # 评估默认读取当前实验导出的 best_model.pth；
     # 只有显式指定 test_model_path 时才切到预训练模型。
@@ -59,6 +66,29 @@ def resolve_eval_model_source(config, exp_dir):
         return {"source_type": "pretrained", "path": requested_model}
 
     return {"source_type": "best", "path": os.path.join(exp_dir, "best_model.pth")}
+
+
+def apply_eval_ablation(model, train_conf):
+    training = train_conf.get("training", {})
+    ablation = training.get("ablation", {})
+
+    if ablation.get("disable_rsign", False):
+        for module in model.modules():
+            if isinstance(module, RSign):
+                module.disabled = True
+
+    if ablation.get("use_original_prelu", False):
+        for name, module in list(model.named_modules()):
+            if not isinstance(module, RPReLU):
+                continue
+            prelu = _AmpCompatiblePReLU(num_parameters=1)
+            prelu.weight.data.fill_(1.0)
+            parent_name, attr_name = name.rsplit(".", 1) if "." in name else ("", name)
+            parent = model
+            for part in parent_name.split("."):
+                if part:
+                    parent = getattr(parent, part)
+            setattr(parent, attr_name, prelu)
 
 
 def build_test_summary(metrics_row):
@@ -74,6 +104,25 @@ def print_test_summary(summary, print_fn=print):
     print_fn("Test Summary")
     for key, value in summary.items():
         print_fn(f"{key}: {value:.3f}")
+
+
+def update_final_metrics_with_test_summary(summary, exp_dir):
+    metrics_path = os.path.join(exp_dir, "final_metrics.json")
+    payload = {}
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as infile:
+            payload = json.load(infile)
+
+    metrics = payload.setdefault("metrics", {})
+    metrics["sdr"] = float(summary["test/sdr"])
+    metrics["sdr_i"] = float(summary["test/sdr_i"])
+    metrics["si_snr"] = float(summary["test/si_snr"])
+    metrics["si_snr_i"] = float(summary["test/si_snr_i"])
+    # 兼容论文/分析脚本中更常见的字段别名
+    metrics["si_snri"] = float(summary["test/si_snr_i"])
+
+    with open(metrics_path, "w", encoding="utf-8") as outfile:
+        json.dump(payload, outfile, indent=2, ensure_ascii=False)
 
 
 def load_wandb_run_metadata(exp_dir):
@@ -141,7 +190,7 @@ def main(config):
     )
 
     train_conf = config["train_conf"]
-    # 原始代码：假定配置里一定有 train_conf.main_args，当前 tiger-small.yml 中不存在会导致 KeyError。
+    # 原始代码：假定配置里一定有 train_conf.main_args，部分精简 yml 未写全会导致 KeyError。
     # config["train_conf"]["main_args"]["exp_dir"] = os.path.join(
     #     os.getcwd(), "Experiments", "checkpoint", config["train_conf"]["exp"]["exp_name"]
     # )
@@ -180,6 +229,7 @@ def main(config):
             sample_rate=train_conf["datamodule"]["data_config"]["sample_rate"],
             **train_conf["audionet"]["audionet_config"],
         )
+        apply_eval_ablation(model, train_conf)
         pretrained = torch.load(model_source["path"], map_location="cpu", weights_only=False)
         if isinstance(pretrained, dict) and "state_dict" in pretrained:
             model.load_state_dict(pretrained["state_dict"], strict=True)
@@ -254,7 +304,7 @@ def main(config):
                     # torchaudio.save(os.path.join(save_dir, "s{}/".format(i + 1)) + key, est_sources_np[i].unsqueeze(0).cpu(), 16000)
                     torchaudio.save(
                         os.path.join(save_dir, "s{}/".format(i + 1))
-                        + key.split("/")[-1],
+                        + result_audio_filename(key),
                         est_sources_np[i].unsqueeze(0).cpu(),
                         16000,
                     )
@@ -263,6 +313,7 @@ def main(config):
     metrics_row = metrics.final()
     summary = build_test_summary(metrics_row)
     print_test_summary(summary)
+    update_final_metrics_with_test_summary(summary, exp_dir)
     try:
         log_test_summary_to_wandb(summary, train_conf, exp_dir)
     except Exception as exc:

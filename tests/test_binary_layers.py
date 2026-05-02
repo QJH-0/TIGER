@@ -5,7 +5,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from look2hear.layers.binary_layers import BinaryConv1d, RPReLU, RSign
+from look2hear.layers.binary_layers import BinaryConv1d, BinaryConv2d, RPReLU, RSign
 
 
 def test_rsign_supports_bct():
@@ -40,3 +40,18 @@ def test_binary_conv1d_keeps_output_shape():
     layer = BinaryConv1d(8, 12, 3, padding=1)
     y = layer(x)
     assert y.shape == (2, 12, 16)
+
+
+def test_binary_conv2d_keeps_output_shape():
+    x = torch.randn(2, 8, 16, 16)
+    layer = BinaryConv2d(8, 12, 3, padding=1)
+    y = layer(x)
+    assert y.shape == (2, 12, 16, 16)
+
+
+def test_binary_conv2d_depthwise():
+    """BinaryConv2d 支持深度可分离卷积（groups=out_channels）。"""
+    x = torch.randn(2, 16, 8, 8)
+    layer = BinaryConv2d(16, 16, 1, groups=16)
+    y = layer(x)
+    assert y.shape == (2, 16, 8, 8)

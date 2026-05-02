@@ -11,6 +11,7 @@ from audio_test import (
     load_wandb_run_metadata,
     log_test_summary_to_wandb,
     print_test_summary,
+    result_audio_filename,
 )
 
 
@@ -49,6 +50,11 @@ def test_print_test_summary_emits_readable_lines():
     printer.assert_any_call("test/sdr_i: 2.500")
     printer.assert_any_call("test/si_snr: 3.750")
     printer.assert_any_call("test/si_snr_i: 4.000")
+
+
+def test_result_audio_filename_supports_windows_and_posix_paths():
+    assert result_audio_filename(r"D:\Paper\datasets\MiniLibriMix\test\mix_both\a.wav") == "a.wav"
+    assert result_audio_filename("/tmp/mix_both/b.wav") == "b.wav"
 
 
 def test_load_wandb_run_metadata_reads_saved_training_run_metadata(tmp_path):

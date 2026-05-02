@@ -1,0 +1,71 @@
+# Local evaluation config for the recovered FP32 Kaggle baseline.
+# Keep exp_name aligned with the original experiment directory so audio_test.py
+# writes metrics back into Experiments\TIGER-Small-MiniLibriMix-Kaggle-T4x2.
+
+audionet:
+  audionet_name: TIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: AudioLightningModule
+  gpus: []
+  parallel: ddp
+  epochs: 300
+  accumulate_grad_batches: 4
+  precision: 16-mixed
+  early_stop:
+    monitor: val/loss
+    mode: min
+    patience: 40
+    verbose: true
+  SpeedAug: true
+
+optimizer:
+  optim_name: adam
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+
+scheduler:
+  sche_name: ReduceLROnPlateau
+  sche_config:
+    patience: 15
+    factor: 0.5
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: D:\Paper\TIGER\DataPreProcess\MiniLibriMix\train
+    valid_dir: D:\Paper\TIGER\DataPreProcess\MiniLibriMix\val
+    test_dir: D:\Paper\TIGER\DataPreProcess\MiniLibriMix\test
+    n_src: 2
+    sample_rate: 16000
+    segment: 3.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+
+exp:
+  exp_name: TIGER-Small-MiniLibriMix-Kaggle-T4x2

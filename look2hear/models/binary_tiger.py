@@ -3,17 +3,21 @@ from __future__ import annotations
 from copy import deepcopy
 from .base_model import BaseModel
 from .tiger import TIGER
-from ..layers.binary_layers import BinaryConv1d, BinaryLinear
+from ..layers.binary_layers import BinaryConv1d, BinaryConv2d, BinaryLinear
 from ..utils.model_converter import TIGERBinaryConverter
 
 
 class BinaryTIGER(BaseModel):
-    # Binary wrapper around the original TIGER.
-    # Paper mapping:
-    # - the architecture itself is still the original TIGER
-    # - binarization is an implementation transform applied after construction
-    # - selected Conv1d/Linear carriers inside the original paper blocks are
-    #   converted, while protected structures stay full precision
+    """Binary wrapper around the original TIGER.
+
+    Paper mapping:
+    - the architecture itself is still the original TIGER
+    - binarization is an implementation transform applied after construction
+    - selected Conv1d/Linear carriers inside the original paper blocks are
+      converted, while protected structures stay full precision
+    - RSign (activation binarization) is inserted before BinaryConv in Sequential
+    - RPReLU (distribution reshaping) replaces all PReLU activations
+    """
     def __init__(self, sample_rate=44100, binary_config=None, **tiger_kwargs):
         super().__init__(sample_rate=sample_rate)
         self.binary_config = dict(binary_config or {})
@@ -22,8 +26,46 @@ class BinaryTIGER(BaseModel):
         # Build the original paper model first.
         self.model = TIGER(**self.model_kwargs)
         # Then convert eligible layers to binary counterparts.
+        # This also inserts RSign and replaces PReLU with RPReLU.
         self.converter = TIGERBinaryConverter(**self.binary_config)
         self.model = self.converter.convert(self.model)
+
+    def remap_checkpoint_keys(self, state_dict: dict) -> dict:
+        """重映射 checkpoint 的 state_dict 键以适配 RSign 包装。
+
+        当 BinaryConv 在 Sequential 中被 RSign 包装后，索引会偏移。
+        例如：model.BN.0.1.weight → model.BN.0.1.2.weight（RSign 插入在 index 1）。
+
+        此方法将旧 checkpoint 的键映射到新结构，用于加载旧 checkpoint。
+        """
+        if not self.converter.rsign_wrapped_modules:
+            return state_dict
+
+        # 构建旧键 → 新键的映射
+        remap = {}
+        for old_conv_path, _rsign_path in self.converter.rsign_wrapped_modules:
+            # old_conv_path 格式: "model.BN.0.1"
+            # 需要匹配 checkpoint 中以该路径开头的键
+            parts = old_conv_path.rsplit(".", 1)
+            if len(parts) != 2:
+                continue
+            prefix, idx_str = parts
+            try:
+                idx = int(idx_str)
+            except ValueError:
+                continue
+            new_idx = idx + 1  # RSign 插入在 BinaryConv 前，索引 +1
+            for key in list(state_dict.keys()):
+                if key.startswith(old_conv_path + "."):
+                    suffix = key[len(old_conv_path):]
+                    new_key = f"{prefix}.{new_idx}{suffix}"
+                    remap[key] = new_key
+
+        if remap:
+            for old_key, new_key in remap.items():
+                state_dict[new_key] = state_dict.pop(old_key)
+
+        return state_dict
 
     def forward(self, wav, mouth=None):
         return self.model(wav)
@@ -32,15 +74,27 @@ class BinaryTIGER(BaseModel):
         # Keep latent weights inside a binary-friendly range between optimizer
         # steps.
         for module in self.modules():
-            if isinstance(module, (BinaryConv1d, BinaryLinear)):
+            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
                 module.clamp_weights()
 
     def set_binary_training(self, enabled: bool) -> None:
         # Warmup runs full-precision weights; binary stage switches forward to
         # sign-projected weights.
         for module in self.modules():
-            if isinstance(module, (BinaryConv1d, BinaryLinear)):
+            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
                 module.use_binary = enabled
+
+    def init_all_scales(self) -> None:
+        """用预训练权重初始化所有二值层的 EMA Scale（在加载 checkpoint 后调用一次）。"""
+        for module in self.modules():
+            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
+                module.init_scale_from_weights()
+
+    def update_all_ema_scales(self) -> None:
+        """EMA 更新所有二值层的 Scale（由 ``BinaryAudioLightningModule.optimizer_step`` 在每次优化步后调用）。"""
+        for module in self.modules():
+            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
+                module.update_ema_scale()
 
     def get_binarization_summary(self):
         # 统计二值化覆盖（按参数个数）并给出多口径大小估计：
@@ -53,7 +107,7 @@ class BinaryTIGER(BaseModel):
         binary_weight_params = 0
         binary_bias_params = 0
         for module in self.modules():
-            if isinstance(module, (BinaryConv1d, BinaryLinear)):
+            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
                 # 这里的 "binary_params" 仍按模块参数总数统计（含 bias），用于覆盖率展示。
                 binary_params += sum(parameter.numel() for parameter in module.parameters())
                 # 但“打包估计”只把 weight 当成 1-bit，bias 仍按 FP32。

@@ -36,6 +36,7 @@ from audio_train import (
     build_wandb_project_name,
     build_wandb_run_name,
     configure_wandb_epoch_metrics,
+    ensure_wandb_login,
     save_wandb_run_metadata,
     sanitize_wandb_config,
 )
@@ -153,7 +154,7 @@ def test_sanitize_wandb_config_flattens_nested_keys_with_underscores():
 def test_build_wandb_project_name_is_stable():
     config = {"exp": {"exp_name": "TIGER-MiniLibriMix"}}
 
-    assert build_wandb_project_name(config) == "tiger-speech-separation"
+    assert build_wandb_project_name(config) == "tiger-speech-separation-model"
 
 
 def test_build_wandb_run_name_uses_model_dataset_and_core_hparams():
@@ -169,6 +170,15 @@ def test_build_wandb_run_name_uses_model_dataset_and_core_hparams():
     run_name = build_wandb_run_name(config)
 
     assert run_name == "tiger-libri2mix-bs4-seg3-kaggle-t4x2"
+
+
+def test_ensure_wandb_login_defers_login_until_called():
+    calls = []
+    wandb_module = types.SimpleNamespace(login=lambda: calls.append("login"))
+
+    ensure_wandb_login(wandb_module)
+
+    assert calls == ["login"]
 
 
 def test_reduce_on_plateau_uses_validation_metric_with_dataloader_suffix():

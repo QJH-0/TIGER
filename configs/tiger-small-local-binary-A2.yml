@@ -1,0 +1,91 @@
+# ?????? A2
+# ???MiniLibriMix-mini ??????
+
+audionet:
+  audionet_name: BinaryTIGER
+  audionet_config:
+    out_channels: 128
+    in_channels: 256
+    num_blocks: 4
+    upsampling_depth: 5
+    win: 640
+    stride: 160
+    num_sources: 2
+    binary_config:
+      protect_first_layer: true
+      protect_attention: true
+      protect_1x1_conv: false
+      protect_output_layer: true
+      enable_binary_linear: false
+      binarize_scope: ["bn", "mask", "dw", "pw"]
+      protect_patterns:
+        - bandsplit.proj
+        - q_proj
+        - k_proj
+        - v_proj
+        - mask_gen
+        - istft
+
+loss:
+  train:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_snr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+  val:
+    loss_func: PITLossWrapper
+    sdr_type: pairwise_neg_sisdr
+    config:
+      pit_from: pw_mtx
+      threshold_byloss: false
+
+training:
+  system: BinaryAudioLightningModule
+  gpus: [0]
+  parallel: none
+  epochs: 60
+  accumulate_grad_batches: 4
+  precision: 16-mixed
+  binary_stage_epochs:
+    activation_warmup: 0
+    weight_binarize: 60
+  ablation:
+    disable_rsign: false
+    skip_warmup: true
+    use_original_prelu: false
+  early_stop:
+    monitor: val/loss
+    mode: min
+    patience: 40
+    verbose: true
+  SpeedAug: true
+
+optimizer:
+  optim_name: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+scheduler:
+  sche_name: CosineAnnealingLR
+  sche_config:
+    T_max: 60
+    eta_min: 1.0e-4
+
+datamodule:
+  data_name: Libri2MixModuleRemix
+  data_config:
+    train_dir: DataPreProcess/MiniLibriMix-mini/train
+    valid_dir: DataPreProcess/MiniLibriMix-mini/val
+    test_dir: DataPreProcess/MiniLibriMix-mini/test
+    n_src: 2
+    sample_rate: 16000
+    segment: 3.0
+    normalize_audio: true
+    batch_size: 1
+    num_workers: 0
+    pin_memory: true
+    persistent_workers: true
+
+exp:
+  exp_name: TIGER-Small-Binary-A2-NoWarmup

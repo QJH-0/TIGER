@@ -19,12 +19,13 @@ from .normalizations import gLN, cLN, LN, bN
 from .binary_layers import (
     BinaryBlock,
     BinaryConv1d,
+    BinaryConv2d,
     BinaryLinear,
     RPReLU,
     RSign,
     ReActNetBlock,
 )
-from .dispatch_layers import DISPATCHLoss
+from .kd_losses import SI_SNR_KDLoss, Subband_KDLoss, Combined_KDLoss
 from .stft import forward_stft, inverse_stft
 from .stft_tfgn import Stft
 
@@ -44,7 +45,6 @@ __all__ = [
     "FRCNNBlock",
     "FRCNNBlockTCN",
     "Bottomup",
-    "Bottomup",
     "Bottomup_Concat_Topdown",
     "Bottomup_Concat_Topdown_TCN",
     "make_enc_dec",
@@ -56,10 +56,13 @@ __all__ = [
     "RSign",
     "RPReLU",
     "BinaryConv1d",
+    "BinaryConv2d",
     "BinaryLinear",
     "BinaryBlock",
     "ReActNetBlock",
-    "DISPATCHLoss",
+    "SI_SNR_KDLoss",
+    "Subband_KDLoss",
+    "Combined_KDLoss",
     "forward_stft",
     "inverse_stft",
     "Stft",
