@@ -418,6 +418,30 @@ def extract_model_state_dict(checkpoint_payload):
     return state_dict
 
 
+def normalize_checkpoint_keys_for_model(model, state_dict):
+    if not isinstance(state_dict, dict) or not state_dict:
+        return state_dict
+
+    model_state_keys = tuple(model.state_dict().keys())
+    if not model_state_keys:
+        return state_dict
+
+    if any(key.startswith("model.") for key in state_dict.keys()):
+        return state_dict
+
+    if not any(key.startswith("model.") for key in model_state_keys):
+        return state_dict
+
+    prefixed_state_dict = {f"model.{key}": value for key, value in state_dict.items()}
+    prefixed_keys = set(prefixed_state_dict.keys())
+    model_keys = set(model_state_keys)
+    original_overlap = len(set(state_dict.keys()) & model_keys)
+    prefixed_overlap = len(prefixed_keys & model_keys)
+    if prefixed_overlap > original_overlap:
+        return prefixed_state_dict
+    return state_dict
+
+
 def summarize_checkpoint_load(model, state_dict, missing_keys, unexpected_keys):
     model_keys = set(model.state_dict().keys())
     checkpoint_keys = set(state_dict.keys())
@@ -468,6 +492,7 @@ def enforce_checkpoint_load_policy(summary, init_label, min_match_ratio=0.5):
 def load_model_checkpoint(model, checkpoint_path, init_label="checkpoint", min_match_ratio=0.5):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = extract_model_state_dict(checkpoint)
+    state_dict = normalize_checkpoint_keys_for_model(model, state_dict)
     # BinaryTIGER 在 converter 中插入了 RSign，导致 Sequential 索引偏移。
     # 加载旧 checkpoint 时需要重映射键名以匹配新结构。
     if hasattr(model, "remap_checkpoint_keys"):

@@ -12,6 +12,7 @@ from audio_train import (
     enforce_checkpoint_load_policy,
     extract_model_state_dict,
     extract_resume_progress,
+    normalize_checkpoint_keys_for_model,
     resolve_datamodule_runtime_config,
     resolve_trainer_runtime_config,
     resolve_cli_resume_override,
@@ -213,6 +214,45 @@ def test_summarize_checkpoint_load_counts_matched_missing_and_unexpected_keys():
     assert summary["missing_key_count"] == 1
     assert summary["unexpected_key_count"] == 1
     assert summary["matched_key_ratio"] == 0.5
+
+
+def test_normalize_checkpoint_keys_for_binary_tiger_adds_model_prefix():
+    model = types.SimpleNamespace(
+        model=object(),
+        state_dict=lambda: {
+            "model.BN.0.0.weight": object(),
+            "model.separator.mask.weight": object(),
+        },
+    )
+    state_dict = {
+        "BN.0.0.weight": 1,
+        "separator.mask.weight": 2,
+    }
+
+    normalized = normalize_checkpoint_keys_for_model(model, state_dict)
+
+    assert normalized == {
+        "model.BN.0.0.weight": 1,
+        "model.separator.mask.weight": 2,
+    }
+
+
+def test_normalize_checkpoint_keys_for_binary_tiger_keeps_prefixed_keys():
+    model = types.SimpleNamespace(
+        model=object(),
+        state_dict=lambda: {
+            "model.BN.0.0.weight": object(),
+            "model.separator.mask.weight": object(),
+        },
+    )
+    state_dict = {
+        "model.BN.0.0.weight": 1,
+        "model.separator.mask.weight": 2,
+    }
+
+    normalized = normalize_checkpoint_keys_for_model(model, state_dict)
+
+    assert normalized == state_dict
 
 
 def test_enforce_checkpoint_load_policy_raises_when_match_ratio_too_low():
