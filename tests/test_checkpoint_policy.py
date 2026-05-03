@@ -9,12 +9,15 @@ from audio_train import (
     build_checkpoint_callback,
     build_resume_summary_message,
     cleanup_training_runtime,
+    enforce_checkpoint_load_policy,
+    extract_model_state_dict,
     extract_resume_progress,
     resolve_datamodule_runtime_config,
     resolve_trainer_runtime_config,
     resolve_cli_resume_override,
     resolve_export_checkpoint_path,
     resolve_resume_checkpoint_path,
+    summarize_checkpoint_load,
 )
 
 
@@ -168,6 +171,72 @@ def test_resolve_export_checkpoint_path_falls_back_to_legacy_root_last_ckpt(tmp_
     checkpoint = types.SimpleNamespace(best_model_path="", last_model_path="")
 
     assert resolve_export_checkpoint_path(checkpoint, str(exp_dir)) == str(last_ckpt)
+
+
+def test_extract_model_state_dict_supports_serialized_best_model_payload():
+    payload = {
+        "model_name": "BinaryTIGER",
+        "state_dict": {
+            "model.weight": 1,
+            "model.bias": 2,
+        },
+        "model_args": {"sample_rate": 16000},
+    }
+
+    state_dict = extract_model_state_dict(payload)
+
+    assert state_dict == {
+        "model.weight": 1,
+        "model.bias": 2,
+    }
+
+
+def test_summarize_checkpoint_load_counts_matched_missing_and_unexpected_keys():
+    model = types.SimpleNamespace(
+        state_dict=lambda: {
+            "layer.weight": object(),
+            "layer.bias": object(),
+        }
+    )
+    incoming_state_dict = {
+        "layer.weight": object(),
+        "unused.weight": object(),
+    }
+    missing = ["layer.bias"]
+    unexpected = ["unused.weight"]
+
+    summary = summarize_checkpoint_load(model, incoming_state_dict, missing, unexpected)
+
+    assert summary["model_key_count"] == 2
+    assert summary["checkpoint_key_count"] == 2
+    assert summary["matched_key_count"] == 1
+    assert summary["missing_key_count"] == 1
+    assert summary["unexpected_key_count"] == 1
+    assert summary["matched_key_ratio"] == 0.5
+
+
+def test_enforce_checkpoint_load_policy_raises_when_match_ratio_too_low():
+    summary = {
+        "checkpoint_path": "D:/tmp/best_model.pth",
+        "model_key_count": 10,
+        "checkpoint_key_count": 10,
+        "matched_key_count": 1,
+        "missing_key_count": 9,
+        "unexpected_key_count": 9,
+        "matched_key_ratio": 0.1,
+        "missing_keys": ["a"],
+        "unexpected_keys": ["b"],
+    }
+
+    try:
+        enforce_checkpoint_load_policy(summary, init_label="warmup", min_match_ratio=0.5)
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "warmup" in message
+        assert "0.1000" in message
+        assert "D:/tmp/best_model.pth" in message
+    else:
+        raise AssertionError("Expected enforce_checkpoint_load_policy() to raise.")
 
 
 def test_extract_resume_progress_reports_completed_and_next_epoch_from_checkpoint():

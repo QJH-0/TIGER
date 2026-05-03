@@ -418,7 +418,54 @@ def extract_model_state_dict(checkpoint_payload):
     return state_dict
 
 
-def load_model_checkpoint(model, checkpoint_path):
+def summarize_checkpoint_load(model, state_dict, missing_keys, unexpected_keys):
+    model_keys = set(model.state_dict().keys())
+    checkpoint_keys = set(state_dict.keys())
+    missing_keys = list(missing_keys)
+    unexpected_keys = list(unexpected_keys)
+    matched_keys = sorted((model_keys & checkpoint_keys) - set(missing_keys))
+    model_key_count = len(model_keys)
+    matched_key_count = len(matched_keys)
+    return {
+        "model_key_count": model_key_count,
+        "checkpoint_key_count": len(checkpoint_keys),
+        "matched_key_count": matched_key_count,
+        "missing_key_count": len(missing_keys),
+        "unexpected_key_count": len(unexpected_keys),
+        "matched_key_ratio": (matched_key_count / model_key_count) if model_key_count else 0.0,
+        "missing_keys": missing_keys,
+        "unexpected_keys": unexpected_keys,
+        "matched_keys_preview": matched_keys[:10],
+    }
+
+
+def format_checkpoint_load_summary(summary, init_label):
+    missing_preview = ", ".join(summary["missing_keys"][:5]) if summary["missing_keys"] else "none"
+    unexpected_preview = ", ".join(summary["unexpected_keys"][:5]) if summary["unexpected_keys"] else "none"
+    return (
+        f"[CheckpointLoad:{init_label}] path={summary['checkpoint_path']}\n"
+        f"  matched={summary['matched_key_count']}/{summary['model_key_count']} "
+        f"({summary['matched_key_ratio']:.4f}) | "
+        f"missing={summary['missing_key_count']} | unexpected={summary['unexpected_key_count']}\n"
+        f"  missing_preview={missing_preview}\n"
+        f"  unexpected_preview={unexpected_preview}"
+    )
+
+
+def enforce_checkpoint_load_policy(summary, init_label, min_match_ratio=0.5):
+    matched_key_count = summary["matched_key_count"]
+    matched_key_ratio = summary["matched_key_ratio"]
+    if matched_key_count <= 0 or matched_key_ratio < float(min_match_ratio):
+        raise RuntimeError(
+            f"{init_label} checkpoint load validation failed for {summary['checkpoint_path']}: "
+            f"matched {matched_key_count}/{summary['model_key_count']} keys "
+            f"({matched_key_ratio:.4f}) < required {float(min_match_ratio):.4f}. "
+            f"missing={summary['missing_key_count']}, unexpected={summary['unexpected_key_count']}. "
+            f"missing_preview={summary['missing_keys'][:5]} unexpected_preview={summary['unexpected_keys'][:5]}"
+        )
+
+
+def load_model_checkpoint(model, checkpoint_path, init_label="checkpoint", min_match_ratio=0.5):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = extract_model_state_dict(checkpoint)
     # BinaryTIGER 在 converter 中插入了 RSign，导致 Sequential 索引偏移。
@@ -426,10 +473,12 @@ def load_model_checkpoint(model, checkpoint_path):
     if hasattr(model, "remap_checkpoint_keys"):
         state_dict = model.remap_checkpoint_keys(state_dict)
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
-    return {
-        "missing_keys": missing,
-        "unexpected_keys": unexpected,
-    }
+    summary = summarize_checkpoint_load(model, state_dict, missing, unexpected)
+    summary["checkpoint_path"] = checkpoint_path
+    summary["init_label"] = init_label
+    print_only(format_checkpoint_load_summary(summary, init_label))
+    enforce_checkpoint_load_policy(summary, init_label=init_label, min_match_ratio=min_match_ratio)
+    return summary
 
 
 def apply_cli_overrides(arg_dic, plain_args):
@@ -499,14 +548,14 @@ def main(config):
     student_init_ckpt = distill_config.get("student_init_ckpt")
     if student_init_ckpt:
         print_only(f"Loading student init checkpoint <{student_init_ckpt}>")
-        load_model_checkpoint(model, student_init_ckpt)
+        load_model_checkpoint(model, student_init_ckpt, init_label="student_init")
 
     # 阶段一共享预热 checkpoint：从预训练的 RSign/RPReLU checkpoint 出发
     training_config = config.get("training", {})
     warmup_ckpt = training_config.get("warmup_ckpt")
     if warmup_ckpt:
         print_only(f"Loading warmup checkpoint <{warmup_ckpt}>")
-        load_model_checkpoint(model, warmup_ckpt)
+        load_model_checkpoint(model, warmup_ckpt, init_label="warmup")
 
     # 初始化 EMA Scale（BinaryTIGER 专用，加载预训练权重后调用一次）
     if hasattr(model, "init_all_scales"):
