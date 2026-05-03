@@ -188,15 +188,16 @@ class BinaryDistillAudioLitModule(BinaryAudioLightningModule):
     # ------------------------------------------------------------------
 
     def _apply_distill_warmup(self) -> None:
-        """蒸馏预热阶段：冻结 BinaryConv 权重，仅训练 RSign/RPReLU。"""
+        """Apply the paper-aligned distillation warmup."""
         is_warming_up = self.current_epoch < self.distill_warmup_epochs
+        if not is_warming_up:
+            return
+
+        for _, param in self.audio_model.named_parameters():
+            param.requires_grad = False
+
         for module in self.audio_model.modules():
-            if isinstance(module, (BinaryConv1d, BinaryConv2d, BinaryLinear)):
-                # 冻结 BinaryConv 的 weight/bias 梯度
-                for param in module.parameters():
-                    param.requires_grad = not is_warming_up
-            elif isinstance(module, (RSign, RPReLU)):
-                # RSign/RPReLU 始终可训练
+            if isinstance(module, (RSign, RPReLU)):
                 for param in module.parameters():
                     param.requires_grad = True
 

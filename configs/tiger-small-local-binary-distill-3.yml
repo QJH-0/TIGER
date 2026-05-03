@@ -72,7 +72,7 @@ distillation:
   kd_type: d3
   teacher_ckpt: Experiments/TIGER-MiniLibriMix-Local/best_model.pth
   student_init_ckpt: Experiments/TIGER-Small-Binary-Local/best_model.pth
-  distill_warmup_epochs: 0
+  distill_warmup_epochs: 5
   loss_calibration: true
   lambda_out_range: [1.0, 0.1]
   lambda_band_range: [1.0, 0.1]

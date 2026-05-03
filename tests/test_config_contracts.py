@@ -131,3 +131,4 @@ def test_local_distill_configs_default_to_local_checkpoints():
         distill = config["distillation"]
         assert distill["teacher_ckpt"] == expected_teacher
         assert distill["student_init_ckpt"] == expected_student
+        assert distill["distill_warmup_epochs"] == 5

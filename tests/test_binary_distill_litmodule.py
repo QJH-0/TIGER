@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 import torch
+import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,6 +33,7 @@ sys.modules.setdefault("speechbrain.processing", processing)
 sys.modules.setdefault("speechbrain.processing.speech_augmentation", speech_augmentation)
 
 from look2hear.layers.kd_losses import Combined_KDLoss, SI_SNR_KDLoss, Subband_KDLoss
+from look2hear.layers.binary_layers import BinaryConv1d, RPReLU, RSign
 from look2hear.system.binary_distill_litmodule import BinaryDistillAudioLitModule
 
 
@@ -172,6 +174,45 @@ def test_cosine_decay_endpoints():
     end = BinaryDistillAudioLitModule._cosine_decay(1.0, 1.0, 0.1)
     assert abs(start - 1.0) < 1e-5
     assert abs(end - 0.1) < 1e-5
+
+
+def test_distill_warmup_trains_only_rsign_and_rprelu():
+    class DummyStudent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = nn.Module()
+            self.model.band_width = BAND_WIDTH_67
+            self.binary = BinaryConv1d(1, 1, 1)
+            self.protected = nn.Conv1d(1, 1, 1)
+            self.rsign = RSign(1)
+            self.rprelu = RPReLU(1)
+
+        def forward(self, wav):
+            b, t = wav.shape[0], wav.shape[-1]
+            return torch.zeros(b, 2, t, device=wav.device, dtype=wav.dtype)
+
+    student = DummyStudent()
+    teacher = SmallSignalStudent()
+    module = BinaryDistillAudioLitModule(
+        audio_model=student,
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config=_base_config({"enabled": True, "kd_type": "d3", "distill_warmup_epochs": 5}),
+        teacher_model=teacher,
+    )
+
+    with patch.object(type(module), "current_epoch", new_callable=PropertyMock) as current_epoch:
+        current_epoch.return_value = 0
+        module.on_train_epoch_start()
+
+    params = dict(module.audio_model.named_parameters())
+    assert params["binary.weight"].requires_grad is False
+    assert params["protected.weight"].requires_grad is False
+    assert params["rsign.alpha"].requires_grad is True
+    assert params["rprelu.beta"].requires_grad is True
 
 
 class SmallSignalStudent(torch.nn.Module):

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import torch
+import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -143,6 +144,160 @@ def test_maybe_update_binary_ema_scales_respects_training_flag():
     module.training = True
     module._maybe_update_binary_ema_scales()
     assert dummy.calls == 1
+
+
+def test_module_freeze_in_activation_warmup_trains_only_rsign_and_rprelu():
+    from look2hear.layers.binary_layers import RPReLU, RSign
+
+    class DummyBinaryModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = nn.Module()
+            self.model.BN = nn.ModuleList([nn.Sequential(nn.Conv1d(1, 1, 1), nn.Conv1d(1, 1, 1))])
+            self.model.mask = nn.ModuleList([nn.Sequential(nn.Conv1d(1, 1, 1))])
+            self.model.rsign_block = RSign(1)
+            self.model.rprelu_block = RPReLU(1)
+
+    module = BinaryAudioLightningModule(
+        audio_model=DummyBinaryModel(),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {
+                "SpeedAug": False,
+                "binary_stage_epochs": {"activation_warmup": 5, "weight_binarize": 10},
+                "freeze_scope": ["bn"],
+            },
+        },
+    )
+
+    with patch.object(type(module), "current_epoch", new_callable=PropertyMock) as current_epoch:
+        current_epoch.return_value = 0
+        module._apply_stage()
+        module._apply_module_freeze()
+
+    params = dict(module.audio_model.named_parameters())
+    assert params["model.BN.0.0.weight"].requires_grad is False
+    assert params["model.mask.0.0.weight"].requires_grad is False
+    assert params["model.rsign_block.alpha"].requires_grad is True
+    assert params["model.rprelu_block.beta"].requires_grad is True
+
+
+def test_module_freeze_in_weight_binarize_trains_target_scope_and_rsign_rprelu():
+    from look2hear.layers.binary_layers import RPReLU, RSign
+
+    class DummyBinaryModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = nn.Module()
+            self.model.BN = nn.ModuleList([nn.Sequential(nn.Conv1d(1, 1, 1), nn.Conv1d(1, 1, 1))])
+            self.model.mask = nn.ModuleList([nn.Sequential(nn.Conv1d(1, 1, 1))])
+            self.model.rsign_block = RSign(1)
+            self.model.rprelu_block = RPReLU(1)
+
+    module = BinaryAudioLightningModule(
+        audio_model=DummyBinaryModel(),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {
+                "SpeedAug": False,
+                "binary_stage_epochs": {"activation_warmup": 5, "weight_binarize": 10},
+                "freeze_scope": ["bn"],
+            },
+        },
+    )
+
+    with patch.object(type(module), "current_epoch", new_callable=PropertyMock) as current_epoch:
+        current_epoch.return_value = 5
+        module._apply_stage()
+        module._apply_module_freeze()
+
+    params = dict(module.audio_model.named_parameters())
+    assert params["model.BN.0.0.weight"].requires_grad is True
+    assert params["model.mask.0.0.weight"].requires_grad is False
+    assert params["model.rsign_block.alpha"].requires_grad is True
+    assert params["model.rprelu_block.beta"].requires_grad is True
+
+
+def test_activation_warmup_without_freeze_scope_still_freezes_fp32_weights():
+    from look2hear.layers.binary_layers import RPReLU, RSign
+
+    class DummyBinaryModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.stem = nn.Conv1d(1, 1, 1)
+            self.rsign_block = RSign(1)
+            self.rprelu_block = RPReLU(1)
+
+    module = BinaryAudioLightningModule(
+        audio_model=DummyBinaryModel(),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {
+                "SpeedAug": False,
+                "binary_stage_epochs": {"activation_warmup": 5, "weight_binarize": 10},
+            },
+        },
+    )
+
+    with patch.object(type(module), "current_epoch", new_callable=PropertyMock) as current_epoch:
+        current_epoch.return_value = 0
+        module._apply_stage()
+        module._apply_module_freeze()
+
+    params = dict(module.audio_model.named_parameters())
+    assert params["stem.weight"].requires_grad is False
+    assert params["rsign_block.alpha"].requires_grad is True
+    assert params["rprelu_block.beta"].requires_grad is True
+
+
+def test_activation_warmup_keeps_rprelu_active_for_paper_schedule():
+    from look2hear.layers.binary_layers import RPReLU
+
+    class DummyBinaryModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.block = RPReLU(1)
+
+        def set_binary_training(self, enabled: bool):
+            self.binary_enabled = enabled
+
+    module = BinaryAudioLightningModule(
+        audio_model=DummyBinaryModel(),
+        optimizer=types.SimpleNamespace(param_groups=[{"lr": 1e-3}]),
+        loss_func={
+            "train": lambda est, tgt: torch.tensor(1.0),
+            "val": lambda est, tgt: torch.tensor(1.0),
+        },
+        config={
+            "datamodule": {"data_config": {"sample_rate": 16000}},
+            "training": {
+                "SpeedAug": False,
+                "binary_stage_epochs": {"activation_warmup": 5, "weight_binarize": 10},
+            },
+        },
+    )
+
+    with patch.object(type(module), "current_epoch", new_callable=PropertyMock) as current_epoch:
+        current_epoch.return_value = 0
+        stage = module._apply_stage()
+
+    assert stage == "activation_warmup"
+    assert module.audio_model.block.active is True
 
 
 def test_on_fit_end_writes_final_metrics_json(tmp_path):

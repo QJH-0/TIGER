@@ -91,20 +91,19 @@ class BinaryAudioLightningModule(AudioLightningModule):
         return "binary"
 
     def _apply_stage(self) -> str:
-        """应用当前训练阶段的二值化设置。"""
+        """Apply the paper-aligned binary-training stage settings."""
         stage = self._resolve_stage()
 
-        # 消融：skip_warmup 时强制跳过预热阶段
         if self.ablation_skip_warmup and stage in {"activation_warmup", "warmup"}:
             stage = "weight_binarize" if "weight_binarize" in self.binary_stage_epochs else "binary"
 
         if hasattr(self.audio_model, "set_binary_training"):
             self.audio_model.set_binary_training(stage in {"binary", "weight_binarize", "finetune"})
-        # ReActNet 风格渐进策略：activation_warmup / warmup 阶段禁用 RPReLU，后续再启用。
-        enable_rprelu = stage not in {"activation_warmup", "warmup"}
+
         for module in self.audio_model.modules():
             if isinstance(module, RPReLU):
-                module.active = enable_rprelu
+                module.active = True
+
         if stage in {"binary", "weight_binarize", "finetune"} and hasattr(self.audio_model, "clamp_all_binary_weights"):
             self.audio_model.clamp_all_binary_weights()
         return stage
@@ -133,25 +132,30 @@ class BinaryAudioLightningModule(AudioLightningModule):
                     setattr(parent, attr_name, prelu)
 
     def _apply_module_freeze(self) -> None:
-        """模块级冻结：仅训练 freeze_scope 中的模块 + RSign/RPReLU 参数。
+        """Apply the paper-aligned freezing rules for each training stage."""
+        stage = self._resolve_stage()
 
-        如果 freeze_scope 为空，则不冻结任何模块。
-        """
+        if stage in {"activation_warmup", "warmup"}:
+            for _, param in self.audio_model.named_parameters():
+                param.requires_grad = False
+            for module in self.audio_model.modules():
+                if isinstance(module, (RSign, RPReLU)):
+                    for param in module.parameters():
+                        param.requires_grad = True
+            return
+
         if not self.freeze_scope:
             return
 
-        for name, param in self.audio_model.named_parameters():
-            # 默认冻结
+        for _, param in self.audio_model.named_parameters():
             param.requires_grad = False
 
-        # 遍历模块，解冻 freeze_scope 中的模块参数
         for name, module in self.audio_model.named_modules():
             category = self._classify_module(name)
             if category in self.freeze_scope:
                 for param in module.parameters():
                     param.requires_grad = True
 
-        # RSign/RPReLU 参数始终可训练
         for module in self.audio_model.modules():
             if isinstance(module, (RSign, RPReLU)):
                 for param in module.parameters():
